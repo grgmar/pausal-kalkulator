@@ -7,7 +7,6 @@ import os
 import re
 from datetime import datetime
 
-# Pokušaj učitavanja pypdf za čitanje PDF računa (ako nije u requirements.txt, aplikacija se neće srušiti)
 try:
     from pypdf import PdfReader
     PDF_SUPPORT = True
@@ -21,7 +20,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- MODERNI CSS DIZAJN (Prilagođen starijim osobama - veliki gumbi, jasne kartice) ---
+# --- TVOJI PODACI ZA NAPLATU PRO PAKETA (Ovdje upiši svoj IBAN i Stripe link) ---
+MOJ_IBAN_ZA_PRO = "HR1234567890123456789"  # Upiši svoj IBAN na koji želiš primati uplate od 14.99 €
+MOJE_IME_FIRMA = "RentFin Obrt / Ime Prezime"
+MOJ_GRAD = "Zagreb"
+CIJENA_PRO_EUR = 14.99
+STRIPE_LINK = "https://buy.stripe.com/test_link"  # Ovdje zalijepi svoj Stripe Payment Link (Google Pay / Apple Pay / Kartice)
+MOJ_WHATSAPP_BROJ = "385911234567"  # Tvoj broj za automatsku potvrdu uplate
+
+# --- MODERNI CSS DIZAJN ---
 st.markdown("""
 <style>
     .main-header {
@@ -29,24 +36,16 @@ st.markdown("""
         color: white;
         padding: 24px;
         border-radius: 16px;
-        margin-bottom: 20px;
+        margin-bottom: 18px;
         text-align: center;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
-    .main-header h1 {
-        color: white !important;
-        margin-bottom: 6px;
-        font-size: 2rem;
-    }
-    .main-header p {
-        color: #d1e8e2;
-        font-size: 1.05rem;
-        margin: 0;
-    }
+    .main-header h1 { color: white !important; margin-bottom: 6px; font-size: 2rem; }
+    .main-header p { color: #d1e8e2; font-size: 1.05rem; margin: 0; }
     .step-card {
         background-color: #f8f9fa;
         border-left: 6px solid #1f77b4;
-        padding: 16px 20px;
+        padding: 15px 18px;
         border-radius: 10px;
         margin-bottom: 16px;
         color: #1e1e1e;
@@ -63,40 +62,49 @@ st.markdown("""
     .eporezna-box {
         background-color: #fff8e6;
         border: 2px solid #ffc107;
-        padding: 16px;
+        padding: 18px;
         border-radius: 12px;
-        margin-top: 12px;
+        margin-top: 14px;
         color: #212529;
+    }
+    .locked-box {
+        background: linear-gradient(135deg, #fff3cd, #ffe69c);
+        border: 2px dashed #d39e00;
+        padding: 20px;
+        border-radius: 12px;
+        margin-top: 15px;
+        color: #332701;
+        text-align: center;
     }
     .wa-btn {
         display: block;
         width: 100%;
         background-color: #25D366 !important;
         color: white !important;
-        padding: 14px 18px;
+        padding: 13px 18px;
         text-align: center;
         text-decoration: none !important;
         font-weight: bold;
         font-size: 1.05rem;
         border-radius: 10px;
-        margin-top: 10px;
-        box-shadow: 0 3px 6px rgba(37, 211, 102, 0.3);
+        margin-top: 8px;
     }
-    .wa-btn:hover {
-        background-color: #1ebe5d !important;
-    }
-    .pro-banner {
-        background: linear-gradient(135deg, #fff3cd, #ffeeba);
-        border: 2px solid #ffecb5;
-        padding: 18px;
-        border-radius: 12px;
-        color: #664d03;
-        margin-top: 15px;
+    .pay-btn {
+        display: block;
+        width: 100%;
+        background-color: #635bff !important;
+        color: white !important;
+        padding: 14px 18px;
+        text-align: center;
+        text-decoration: none !important;
+        font-weight: bold;
+        font-size: 1.08rem;
+        border-radius: 10px;
+        margin-top: 8px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- BAZA GRADOVA I STOPA ---
 CITIES = {
     "Split": {"tax": 150.0, "fee": 50.0, "iban": "HR3324070001840900000", "tz_iban": "HR4310010051738904754"},
     "Zagreb": {"tax": 199.0, "fee": 55.0, "iban": "HR3423600001813300007", "tz_iban": "HR6110010051713304759"},
@@ -109,25 +117,10 @@ CITIES = {
     "Ostale općine (standard)": {"tax": 60.0, "fee": 45.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"}
 }
 
-PLATFORMS = {
-    "Booking.com": {
-        "company": "Booking.com B.V.",
-        "country_code": "NL",
-        "vat_id": "805734958B01",
-        "full_vat": "NL805734958B01",
-        "address": "Oosterdokskade 163, Amsterdam"
-    },
-    "Airbnb": {
-        "company": "Airbnb Ireland UC",
-        "country_code": "IE",
-        "vat_id": "9827384L",
-        "full_vat": "IE9827384L",
-        "address": "8 Hanover Quay, Dublin"
-    }
-}
-
 DRZAVNI_PRORACUN_IBAN = "HR1210010051863000160"
-SUBSCRIBERS_FILE = "pretplatnici.json"
+
+if "invoices" not in st.session_state:
+    st.session_state.invoices = []
 
 
 # --- POMOĆNE FUNKCIJE ---
@@ -136,24 +129,30 @@ def format_hub3_amount(amount):
     return f"{cents:015d}"
 
 
-def normalize_phone(phone):
-    cleaned = "".join(c for c in str(phone) if c.isdigit() or c == "+")
-    if cleaned.startswith("09"):
-        cleaned = "+385" + cleaned[1:]
-    elif cleaned.startswith("385"):
-        cleaned = "+" + cleaned
-    return cleaned
+def get_expected_pro_code(oib):
+    """Generira jedinstveni PRO ključ na temelju OIB-a korisnika."""
+    if len(str(oib)) == 11 and str(oib).isdigit():
+        num = (int(str(oib)[-4:]) * 7 + 137) % 9000 + 1000
+        return f"PRO-{num}"
+    return "PRO-2026"
+
+
+def check_pro_access(entered_code, oib):
+    clean = str(entered_code).strip().upper()
+    return clean in ["RENT2026", get_expected_pro_code(oib)]
 
 
 def create_wa_direct_link(phone, message):
-    clean_num = normalize_phone(phone).replace("+", "")
+    clean_num = "".join(c for c in str(phone) if c.isdigit())
+    if clean_num.startswith("09"):
+        clean_num = "385" + clean_num[1:]
     encoded_msg = urllib.parse.quote(message)
     if clean_num:
         return f"https://wa.me/{clean_num}?text={encoded_msg}"
     return f"https://wa.me/?text={encoded_msg}"
 
 
-def render_wa_button(url, text="📲 Pošalji uplatnicu i podatke na WhatsApp"):
+def render_wa_button(url, text="📲 Pošalji podatke na WhatsApp"):
     st.markdown(f'<a href="{url}" target="_blank" class="wa-btn">{text}</a>', unsafe_allow_html=True)
 
 
@@ -179,168 +178,92 @@ def generate_hub3_barcode(
     return buf.getvalue()
 
 
-def extract_commission_from_pdf(uploaded_file):
-    """Pokušava automatski izvući iznos provizije u EUR iz Booking ili Airbnb PDF fakture."""
-    if not PDF_SUPPORT:
-        return None
-    try:
-        reader = PdfReader(uploaded_file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() or ""
-        # Traži brojeve u formatu 123,45 ili 123.45 uz oznaku EUR / €
-        matches = re.findall(r"(?:EUR|€)\s*([0-9]{1,5}[.,][0-9]{2})|([0-9]{1,5}[.,][0-9]{2})\s*(?:EUR|€)", text)
-        amounts = []
-        for m in matches:
-            val_str = m[0] if m[0] else m[1]
-            val_str = val_str.replace(",", ".")
-            try:
-                val = float(val_str)
-                if 1.0 < val < 15000.0:
-                    amounts.append(val)
-            except ValueError:
-                pass
-        if amounts:
-            return max(amounts)
-    except Exception:
-        return None
-    return None
+def generate_combined_xml(name, oib, month, year, booking_base, airbnb_base, total_vat):
+    total_base = booking_base + airbnb_base
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<ObrazacPDV_RentFinPRO verzija="2.0">
+    <Obveznik><ImePrezime>{name}</ImePrezime><OIB>{oib}</OIB></Obveznik>
+    <Razdoblje><Mjesec>{month}</Mjesec><Godina>{year}</Godina></Razdoblje>
+    <Obrazac_PDV_S>
+        <Stavka_Booking Drzava="NL" PDV_ID="805734958B01" Iznos="{booking_base:.2f}" />
+        <Stavka_Airbnb Drzava="IE" PDV_ID="9827384L" Iznos="{airbnb_base:.2f}" />
+    </Obrazac_PDV_S>
+    <Obrazac_PDV>
+        <Redak_II_10 OsnovicaUkupno="{total_base:.2f}" PDV_25_Posto="{total_vat:.2f}" />
+    </Obrazac_PDV>
+</ObrazacPDV_RentFinPRO>"""
+    return xml.encode("utf-8")
 
 
-def generate_eporezna_xml(name, oib, month, year, platform_name, base_amount, vat_amount):
-    """Generira XML datoteku s obračunskim podacima za PDV i PDV-S obrazac."""
-    p_info = PLATFORMS.get(platform_name, PLATFORMS["Booking.com"])
-    xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<ObrazacPDV_RentFin verzija="1.0">
-    <Metapodaci>
-        <DatumIzrade>{datetime.now().strftime("%Y-%m-%d")}</DatumIzrade>
-        <RazdobljeOd>{year}-{month}-01</RazdobljeOd>
-    </Metapodaci>
-    <PorezniObveznik>
-        <ImePrezime>{name}</ImePrezime>
-        <OIB>{oib}</OIB>
-    </PorezniObveznik>
-    <PDV_S_Podaci>
-        <DrzavaClanica>{p_info['country_code']}</DrzavaClanica>
-        <PDV_ID_Dobavljaca>{p_info['vat_id']}</PDV_ID_Dobavljaca>
-        <NazivDobavljaca>{p_info['company']}</NazivDobavljaca>
-        <IznosPrimljenihUsluga>{base_amount:.2f}</IznosPrimljenihUsluga>
-    </PDV_S_Podaci>
-    <PDV_Obrazac_Sekcija_II>
-        <Redak_II_10_PrimljeneUslugeEU_25Posto>
-            <Osnovica>{base_amount:.2f}</Osnovica>
-            <Porez>{vat_amount:.2f}</Porez>
-        </Redak_II_10_PrimljeneUslugeEU_25Posto>
-        <UkupnoZaUplatu>{vat_amount:.2f}</UkupnoZaUplatu>
-    </PDV_Obrazac_Sekcija_II>
-</ObrazacPDV_RentFin>"""
-    return xml_content.encode("utf-8")
-
-
-def save_subscriber(sub_data):
-    subs = []
-    if os.path.exists(SUBSCRIBERS_FILE):
-        try:
-            with open(SUBSCRIBERS_FILE, "r", encoding="utf-8") as f:
-                subs = json.load(f)
-        except Exception:
-            subs = []
-
-    updated = False
-    for i, s in enumerate(subs):
-        if s.get("phone") == sub_data["phone"]:
-            subs[i] = sub_data
-            updated = True
-            break
-    if not updated:
-        subs.append(sub_data)
-
-    with open(SUBSCRIBERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(subs, f, ensure_ascii=False, indent=2)
-
-
-# --- ZAGLAVLJE APLIKACIJE ---
+# --- ZAGLAVLJE ---
 st.markdown("""
 <div class="main-header">
     <h1>🇭🇷 RentFin HR</h1>
-    <p>Jednostavne uplatnice, upute za ePoreznu i WhatsApp podsjetnici za iznajmljivače</p>
+    <p>Sve uplatnice, ePorezna obrasci i Evidencija prometa za iznajmljivače na jednom mjestu</p>
 </div>
 """, unsafe_allow_html=True)
 
-# --- KORAK 1: PROFIL IZNAJMLJIVAČA (Upisuje se samo jednom na vrhu) ---
-with st.expander("👤 KORAK 1: Vaši podaci (Kliknite za izmjenu – upisuje se samo jednom)", expanded=True):
+# --- KORAK 1: OSOBNI PODACI I PRO STATUS ---
+with st.expander("👤 KORAK 1: Vaši podaci i PRO status (Upišite jednom)", expanded=True):
     p1, p2 = st.columns(2)
     with p1:
-        g_name = st.text_input("Vaše ime i prezime", value="Ivan Horvat")
+        g_name = st.text_input("Ime i prezime iznajmljivača", value="Ivan Horvat")
         g_oib = st.text_input("Vaš OIB (11 znamenki)", value="12345678901", max_chars=11)
-        g_address = st.text_input("Ulica i kućni broj", value="Obala HNP 1")
+        g_address = st.text_input("Adresa objekta", value="Obala HNP 1")
     with p2:
-        g_city = st.selectbox("Grad / Općina objekta", list(CITIES.keys()))
+        g_city = st.selectbox("Grad / Općina", list(CITIES.keys()))
         g_beds = st.number_input("Broj glavnih kreveta", min_value=1, max_value=50, value=4)
-        g_extra_beds = st.number_input("Broj pomoćnih kreveta", min_value=0, max_value=50, value=0)
+        pro_code_input = st.text_input("🔑 Imate PRO ključ? Upišite ga ovdje:", placeholder="Npr. RENT2026 za test")
 
-    if len(g_oib) != 11 or not g_oib.isdigit():
-        st.warning("⚠️ Molimo unesite točan OIB od 11 znamenki kako bi uplatnice bile ispravne.")
+    is_pro = check_pro_access(pro_code_input, g_oib)
+    if is_pro:
+        st.success("⭐ **PRO Paket je AKTIVAN!** Otključani su ePorezna šalabahteri, XML datoteke i Evidencija prometa.")
+    else:
+        st.info("ℹ️ Koristite **Besplatnu verziju** (osnovni kalkulator i barkod). Za otključavanje ePorezna uputa, računa za goste i Evidencije prometa kliknite na tab **⭐ Kupi PRO (14,99 €)** ili upišite testni kod `RENT2026`.")
 
-st.write("")
-
-# --- GLAVNI TABOVI (KORAK 2) ---
-tab1, tab2, tab3, tab4 = st.tabs([
-    "⚡ 1. Mjesečni PDV (Booking/Airbnb)",
-    "🛏️ 2. Kvartalni paušal",
-    "🏛️ 3. Turistička članarina (TZ)",
-    "📲 4. WhatsApp & PRO Paket"
+# --- GLAVNI TABOVI ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "⚡ 1. PDV (Booking/Airbnb)",
+    "🛏️ 2. Paušal & TZ",
+    "🧾 3. Računi & Evidencija (PRO)",
+    "🤖 4. Porezni Savjetnik",
+    "⭐ 5. Kupi PRO (14,99 €)"
 ])
 
 # ==============================================================================
-# TAB 1: MJESEČNI PDV NA PROVIZIJU + UPUTE ZA ePOREZNU
+# TAB 1: MJESEČNI PDV (KOMBINIRANO BOOKING + AIRBNB)
 # ==============================================================================
 with tab1:
     st.markdown("""
     <div class="step-card">
         <span class="step-badge">ROK: 20. U MJESECU</span>
-        <b>Što ovdje radite?</b> Ako ste prošli mjesec imali goste preko Booking.com ili Airbnba, 
-        ovdje izračunajte 25% PDV-a na njihovu proviziju, preuzmite 2D barkod za uplatu i pročitajte točno što upisati u ePoreznu.
+        Upišite iznos provizije s Booking.com i/ili Airbnb računa za prošli mjesec. Sustav će sve zbrojiti i napraviti jednu zajedničku uplatnicu.
     </div>
     """, unsafe_allow_html=True)
 
-    col_p1, col_p2 = st.columns(2)
-    with col_p1:
-        platform = st.selectbox("Preko koga ste imali goste?", ["Booking.com", "Airbnb"])
-    with col_p2:
-        month_ref = st.selectbox("Za koji mjesec plaćate?", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], index=6)
+    month_ref = st.selectbox("Mjesec za koji plaćate PDV:", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], index=6)
 
-    # Opcija učitavanja PDF-a
-    uploaded_pdf = st.file_uploader("📄 Imate PDF račun od Bookinga/Airbnba? Učitajte ga ovdje za automatski izračun (ili upišite iznos ručno ispod):", type=["pdf"])
-    
-    default_comm = 120.0
-    if uploaded_pdf is not None:
-        detected = extract_commission_from_pdf(uploaded_pdf)
-        if detected:
-            default_comm = detected
-            st.success(f"✅ Iz PDF računa je automatski pročitan iznos provizije: **{detected:.2f} €**")
-        else:
-            st.info("ℹ️ Upišite konačni iznos provizije s računa u polje ispod.")
+    c_b, c_a = st.columns(2)
+    with c_b:
+        booking_eur = st.number_input("📘 Iznos Booking.com provizije (€):", min_value=0.0, value=120.0, step=10.0)
+    with c_a:
+        airbnb_eur = st.number_input("📕 Iznos Airbnb provizije (€):", min_value=0.0, value=0.0, step=10.0)
 
-    commission_eur = st.number_input(
-        "💶 Ukupan iznos provizije s računa u EUR (Osnovica):",
-        min_value=1.0,
-        value=float(default_comm),
-        step=5.0
-    )
+    total_base = round(booking_eur + airbnb_eur, 2)
+    pdv_amount = round(total_base * 0.25, 2)
 
-    pdv_amount = round(commission_eur * 0.25, 2)
+    m1, m2 = st.columns(2)
+    m1.metric("Ukupna osnovica (Booking + Airbnb)", f"{total_base:.2f} €")
+    m2.metric("Ukupni PDV za uplatu (25%)", f"{pdv_amount:.2f} €")
 
-    m_col1, m_col2 = st.columns(2)
-    m_col1.metric("Osnovica (iznos računa)", f"{commission_eur:.2f} €")
-    m_col2.metric("PDV za uplatu (25%)", f"{pdv_amount:.2f} €")
-
-    if st.button("🚀 Kreiraj uplatnicu i upute za ePoreznu", type="primary", use_container_width=True, key="btn_pdv"):
-        if len(g_oib) != 11 or not g_oib.isdigit():
-            st.error("❌ Unesite ispravan OIB od 11 znamenki u Koraku 1 na vrhu stranice.")
+    if st.button("🚀 Generiraj 2D barkod uplatnicu za PDV", type="primary", use_container_width=True):
+        if total_base <= 0:
+            st.warning("Unesite iznos provizije veći od 0 €.")
+        elif len(g_oib) != 11 or not g_oib.isdigit():
+            st.error("Unesite ispravan OIB od 11 znamenki u Koraku 1.")
         else:
             ref_num = f"1201-{g_oib}"
-            desc = f"PDV na proviziju {platform} mj {month_ref}"
+            desc = f"PDV na proviziju mj {month_ref}"
 
             barcode = generate_hub3_barcode(
                 g_name, g_address, g_city,
@@ -349,235 +272,224 @@ with tab1:
                 "HR68", ref_num, "TAXS", desc
             )
 
-            st.subheader("1️⃣ Skenirajte barkod svojom bankovnom aplikacijom:")
-            st.image(barcode, caption=f"Iznos: {pdv_amount:.2f} EUR | Poziv na broj: HR68 {ref_num}", width=320)
+            st.image(barcode, caption=f"Skenirajte m-bankingom | Iznos: {pdv_amount:.2f} € | Poziv: HR68 {ref_num}", width=320)
+            st.download_button("⬇️ Preuzmi barkod uplatnicu (PNG)", data=barcode, file_name=f"PDV_{month_ref}.png", mime="image/png", use_container_width=True)
 
             wa_text = (
-                f"🇭🇷 *RentFin HR - Uplata PDV-a ({platform})*\n\n"
-                f"💶 *Za uplatu (25%):* {pdv_amount:.2f} EUR\n"
+                f"🇭🇷 *RentFin HR - Uplata PDV-a (mj. {month_ref})*\n"
+                f"💶 *Za uplatu:* {pdv_amount:.2f} EUR\n"
                 f"🏦 *IBAN:* {DRZAVNI_PRORACUN_IBAN}\n"
-                f"🔢 *Model i poziv na broj:* HR68 {ref_num}\n"
-                f"📌 *Opis:* {desc}\n"
-                f"⏳ *Rok:* 20. u mjesecu"
+                f"🔢 *Poziv na broj:* HR68 {ref_num}"
             )
+            render_wa_button(create_wa_direct_link("", wa_text), "📲 Pošalji uplatnicu sebi na WhatsApp")
 
-            dl_col1, dl_col2 = st.columns(2)
-            with dl_col1:
+            # PRO DIO: ŠALABAHTER ZA ePOREZNU I XML
+            if is_pro:
+                st.markdown(f"""
+                <div class="eporezna-box">
+                    <h4>📋 VAŠ PRO ŠALABAHTER ZA ePOREZNU (Mjesec {month_ref})</h4>
+                    <p><b>1. Obrazac PDV-S (Stjecanje usluga iz EU):</b></p>
+                    <ul>
+                        {"<li>Redak 1: Država <b>NL</b> | PDV ID: <b>805734958B01</b> (Booking) | Iznos: <b>" + f"{booking_eur:.2f} €</b></li>" if booking_eur > 0 else ""}
+                        {"<li>Redak 2: Država <b>IE</b> | PDV ID: <b>9827384L</b> (Airbnb) | Iznos: <b>" + f"{airbnb_eur:.2f} €</b></li>" if airbnb_eur > 0 else ""}
+                    </ul>
+                    <p><b>2. Obrazac PDV (Glavni obrazac):</b></p>
+                    <ul>
+                        <li>U redak <b>II.10. (Primljene usluge iz EU po stopi 25%)</b> upišite zbrojeno:</li>
+                        <li>Porezna osnovica: <b>{total_base:.2f} €</b> | PDV (Porez): <b>{pdv_amount:.2f} €</b></li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+
+                xml_data = generate_combined_xml(g_name, g_oib, month_ref, datetime.now().year, booking_eur, airbnb_eur, pdv_amount)
                 st.download_button(
-                    "⬇️ Preuzmi sliku barkoda (PNG)",
-                    data=barcode,
-                    file_name=f"Uplatnica_PDV_{platform}_{month_ref}.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-            with dl_col2:
-                xml_bytes = generate_eporezna_xml(g_name, g_oib, month_ref, datetime.now().year, platform, commission_eur, pdv_amount)
-                st.download_button(
-                    "📄 Preuzmi XML obračun (ePorezna)",
-                    data=xml_bytes,
-                    file_name=f"ePorezna_PDV_{platform}_{month_ref}.xml",
+                    "📄 Preuzmi kombinirani XML za ePoreznu (PRO)",
+                    data=xml_data,
+                    file_name=f"ePorezna_PDV_{month_ref}.xml",
                     mime="application/xml",
                     use_container_width=True
                 )
-
-            render_wa_button(create_wa_direct_link("", wa_text), "📲 Pošalji podatke za uplatu sebi na WhatsApp")
-
-            # ŠALABAHTER ZA ePOREZNU (Starije osobe ovo obožavaju jer im točno piše što kliknuti)
-            p_info = PLATFORMS[platform]
-            st.markdown(f"""
-            <div class="eporezna-box">
-                <h4>📋 ŠALABAHTER ZA ePOREZNU (Korak po korak u 2 minute)</h4>
-                <p>Kada uđete u sustav <b>ePorezna</b> (preko e-Građani), trebate poslati dva obrasca do 20. u mjesecu:</p>
-                <ol>
-                    <li><b>Obrazac PDV-S (Stjecanje usluga iz EU):</b>
-                        <ul>
-                            <li>Kod države: <b>{p_info['country_code']}</b> ({p_info['company']})</li>
-                            <li>PDV identifikacijski broj dobavljača: <b>{p_info['vat_id']}</b></li>
-                            <li>Iznos primljenih usluga (Stupac 6): <b>{commission_eur:.2f} €</b></li>
-                        </ul>
-                    </li>
-                    <li><b>Obrazac PDV (Obračun PDV-a):</b>
-                        <ul>
-                            <li>Pronađite redak <b>II.10. Primljene usluge iz EU po stopi 25%</b></li>
-                            <li>U polje <i>Porezna osnovica</i> upišite: <b>{commission_eur:.2f} €</b></li>
-                            <li>U polje <i>PDV (Porez)</i> upišite: <b>{pdv_amount:.2f} €</b></li>
-                        </ul>
-                    </li>
-                </ol>
-            </div>
-            """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="locked-box">
+                    <h4>🔒 Šalabahter za ePoreznu (točna polja i EU PDV brojevi) + XML datoteka su zaključani</h4>
+                    <p>Ne znate koja točno polja ispuniti u obrascima <b>PDV</b> i <b>PDV-S</b> u sustavu ePorezna ili kako zbrojiti Booking i Airbnb?<br>
+                    Otključajte točne upute korak-po-korak i XML datoteku u <b>PRO paketu (14,99 € godišnje)</b>.</p>
+                </div>
+                """, unsafe_allow_html=True)
 
 # ==============================================================================
-# TAB 2: KVARTALNI PAUŠALNI POREZ I PRISTOJBA
+# TAB 2: KVARTALNI PAUŠAL I TURISTIČKA ČLANARINA
 # ==============================================================================
 with tab2:
-    st.markdown("""
-    <div class="step-card">
-        <span class="step-badge">4 PUTA GODIŠNJE</span>
-        <b>Kvartalni paušalni porez:</b> Plaća se do kraja svakog tromjesečja (31.3., 30.6., 30.9. i 31.12.) prema broju glavnih kreveta.
-    </div>
-    """, unsafe_allow_html=True)
-
-    quarter = st.selectbox("Odaberite kvartal (tromjesečje) za koji plaćate ratu:", [
-        "1. kvartal (rok do 31.03.)",
-        "2. kvartal (rok do 30.06.)",
-        "3. kvartal (rok do 30.09.)",
-        "4. kvartal (rok do 31.12.)"
+    st.subheader("🛏️ Kvartalni paušalni porez i Turistička članarina")
+    quarter = st.selectbox("Odaberite što plaćate:", [
+        "Paušalni porez - 1. kvartal (rok 31.03.)",
+        "Paušalni porez - 2. kvartal (rok 30.06.)",
+        "Paušalni porez - 3. kvartal (rok 30.09.)",
+        "Paušalni porez - 4. kvartal (rok 31.12.)",
+        "Godišnja turistička članarina TZ (rok 15.01.)"
     ])
-    q_num = quarter[0]
 
     city_data = CITIES[g_city]
-    annual_tax = g_beds * city_data["tax"]
-    q_tax = round(annual_tax / 4, 2)
-    annual_fee = round((g_beds * city_data["fee"]) + (g_extra_beds * city_data["fee"] * 0.5), 2)
+    if "Paušalni porez" in quarter:
+        q_num = quarter.split("- ")[1][0]
+        amount_to_pay = round((g_beds * city_data["tax"]) / 4, 2)
+        target_iban = city_data["iban"]
+        model = "HR68"
+        ref = f"1503-{g_oib}"
+        desc = f"Pausalni porez {q_num}. kv"
+    else:
+        amount_to_pay = round(g_beds * 11.25, 2)
+        target_iban = city_data["tz_iban"]
+        model = "HR67"
+        ref = f"{g_oib}"
+        desc = f"Turisticka clanarina {g_city[:12]}"
 
-    k_col1, k_col2 = st.columns(2)
-    k_col1.metric(f"Rata poreza za {q_num}. kvartal", f"{q_tax:.2f} €", help=f"Godišnje ukupno: {annual_tax:.2f} €")
-    k_col2.metric("Godišnja turistička pristojba (eVisitor)", f"{annual_fee:.2f} €", help="Plaća se u 3 rate: 31.7., 31.8. i 30.9.")
+    st.metric("Iznos za uplatu", f"{amount_to_pay:.2f} €")
 
-    custom_iban = st.text_input("IBAN Grada/Općine za paušalni porez:", value=city_data["iban"])
-
-    if st.button("🚀 Kreiraj uplatnicu za kvartalni paušal", type="primary", use_container_width=True, key="btn_pausal"):
-        if len(g_oib) != 11 or not g_oib.isdigit():
-            st.error("❌ Unesite ispravan OIB od 11 znamenki u Koraku 1 na vrhu stranice.")
-        else:
-            ref_num = f"1503-{g_oib}"
-            desc = f"Pausalni porez za {q_num}. kvartal"
-
-            barcode = generate_hub3_barcode(
-                g_name, g_address, g_city,
-                f"Grad/Opcina {g_city[:14]}", g_city, g_city,
-                q_tax, custom_iban,
-                "HR68", ref_num, "TAXS", desc
-            )
-
-            st.image(barcode, caption=f"Skenirajte m-bankingom (HR68 {ref_num})", width=320)
-
-            wa_pausal_text = (
-                f"🇭🇷 *RentFin HR - Kvartalni paušal ({q_num}. kvartal)*\n\n"
-                f"📍 *Grad/Općina:* {g_city}\n"
-                f"💶 *Iznos rate:* {q_tax:.2f} EUR\n"
-                f"🏦 *IBAN:* {custom_iban}\n"
-                f"🔢 *Poziv na broj:* HR68 {ref_num}\n"
-                f"📌 *Opis:* {desc}"
-            )
-
-            st.download_button("⬇️ Preuzmi barkod uplatnicu (PNG)", data=barcode, file_name=f"Pausal_Q{q_num}.png", mime="image/png", use_container_width=True)
-            render_wa_button(create_wa_direct_link("", wa_pausal_text), "📲 Pošalji uplatnicu za paušal na WhatsApp")
+    if st.button("🚀 Generiraj barkod uplatnicu", type="primary", use_container_width=True, key="btn_t2"):
+        barcode = generate_hub3_barcode(
+            g_name, g_address, g_city,
+            f"Grad/TZ {g_city[:15]}", g_city, g_city,
+            amount_to_pay, target_iban,
+            model, ref, "TAXS", desc
+        )
+        st.image(barcode, caption=f"{desc} | Iznos: {amount_to_pay:.2f} € | {model} {ref}", width=320)
 
 # ==============================================================================
-# TAB 3: TURISTIČKA ČLANARINA (OBRAZAC TZ 2)
+# TAB 3: RAČUNI ZA GOSTE I EVIDENCIJA PROMETA (PRO ZNAČAJKA KOJA SE NAJVIŠE TRAŽI)
 # ==============================================================================
 with tab3:
-    st.markdown("""
-    <div class="step-card">
-        <span class="step-badge">ROK: 15. SIJEČNJA</span>
-        <b>Turistička članarina (Obrazac TZ 2):</b> Plaća se prema broju kreveta (45 € za glavni krevet, 22,50 € za pomoćni krevet), 
-        a obrazac TZ 2 predaje se u ePoreznu do 15. siječnja.
-    </div>
-    """, unsafe_allow_html=True)
+    st.subheader("🧾 Izrada računa za goste i Evidencija o prometu (Obrazac EP)")
+    st.write("Po zakonu svaki iznajmljivač mora izdati račun gostu i voditi **Evidenciju o prometu** kako bi u siječnju predao **TZ 2 obrazac**.")
 
-    tz_main_rate = 45.0 / 4.0  # Iznos za 1. skupinu turističkih mjesta (paušal po krevetu)
-    tz_total = round((g_beds * 11.25) + (g_extra_beds * 5.63), 2)
+    if not is_pro:
+        st.markdown("""
+        <div class="locked-box">
+            <h4>🔒 Ova značajka je dostupna u PRO paketu (14,99 € / godišnje)</h4>
+            <p>U PRO verziji možete u 3 klika izraditi službeni račun za gosta (na hrvatskom i engleskom), 
+            a aplikacija vam automatski zbraja sve račune u zakonsku <b>Evidenciju o prometu (Obrazac EP)</b> i računa iznos za <b>TZ 2 obrazac</b>.<br><br>
+            <i>(Za besplatnu probu upišite kod <b>RENT2026</b> u Koraku 1 na vrhu stranice!)</i></p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            inv_num = st.text_input("Broj računa", value=f"{len(st.session_state.invoices)+1}/2026")
+            guest_name = st.text_input("Ime i prezime gosta", value="John Smith")
+        with r2:
+            nights = st.number_input("Broj noćenja", min_value=1, value=7)
+            price_per_night = st.number_input("Cijena noćenja (€)", min_value=10.0, value=100.0, step=5.0)
+        with r3:
+            channel = st.selectbox("Kako je gost platio?", ["Transakcijski račun (Booking/Airbnb)", "Gotovina"])
 
-    t_col1, t_col2 = st.columns(2)
-    with t_col1:
-        total_receipts = st.number_input("Ukupni primici iz Evidencije prometa u prošloj godini (€):", min_value=0.0, value=8500.0, step=100.0)
-    with t_col2:
-        tz_amount = st.number_input("Iznos godišnje članarine za uplatu (€):", min_value=1.0, value=float(tz_total), step=1.0)
+        total_inv = round(nights * price_per_night, 2)
 
-    if st.button("🚀 Kreiraj uplatnicu za Turističku članarinu", type="primary", use_container_width=True, key="btn_tz"):
-        if len(g_oib) != 11 or not g_oib.isdigit():
-            st.error("❌ Unesite ispravan OIB od 11 znamenki u Koraku 1.")
-        else:
-            ref_num = f"1732-{g_oib}"
-            desc = f"Turisticka clanarina {g_city[:15]}"
-            tz_iban = CITIES[g_city]["tz_iban"]
+        if st.button("➕ Dodaj račun u Evidenciju prometa i prikaži za ispis", type="primary", use_container_width=True):
+            st.session_state.invoices.append({
+                "Broj računa": inv_num,
+                "Datum": datetime.now().strftime("%d.%m.%Y."),
+                "Gost": guest_name,
+                "Način plaćanja": channel,
+                "Iznos (EUR)": total_inv
+            })
+            st.success(f"Račun {inv_num} na iznos {total_inv:.2f} € je dodan u vašu Evidenciju o prometu!")
 
-            barcode = generate_hub3_barcode(
-                g_name, g_address, g_city,
-                f"TZ {g_city[:20]}", g_city, g_city,
-                tz_amount, tz_iban,
-                "HR67", f"{g_oib}", "TAXS", desc
-            )
+            # Prikaz računa za ispis / slanje gostu
+            st.code(f"""
+========================================================
+            RAČUN / INVOICE Br. {inv_num}
+========================================================
+IZNAJMLJIVAČ / HOST: {g_name}
+ADRESA / ADDRESS:    {g_address}, {g_city}
+OIB / TAX ID:        {g_oib}
+--------------------------------------------------------
+GOST / GUEST:        {guest_name}
+USLUGA / SERVICE:    Smještaj u apartmanu ({nights} noćenja x {price_per_night:.2f} EUR)
+--------------------------------------------------------
+UKUPNO ZA PLATITI / TOTAL:  {total_inv:.2f} EUR
+--------------------------------------------------------
+Napomena: Iznajmljivač nije u sustavu PDV-a prema čl. 90. st. 2. Zakona o PDV-u.
+Datum izdavanja: {datetime.now().strftime("%d.%m.%Y.")}
+========================================================
+            """)
 
-            st.image(barcode, caption=f"Skenirajte m-bankingom (Model HR67, Poziv: {g_oib})", width=320)
-
-            wa_tz_text = (
-                f"🇭🇷 *RentFin HR - Turistička članarina (TZ 2)*\n\n"
-                f"💶 *Za uplatu:* {tz_amount:.2f} EUR\n"
-                f"🏦 *IBAN TZ-a:* {tz_iban}\n"
-                f"🔢 *Model i poziv na broj:* HR67 {g_oib}\n"
-                f"📊 *Ukupni promet za upis u TZ2:* {total_receipts:.2f} EUR"
-            )
-            render_wa_button(create_wa_direct_link("", wa_tz_text), "📲 Pošalji TZ uplatnicu na WhatsApp")
+        if st.session_state.invoices:
+            st.subheader("📊 Vaša Evidencija o prometu (Obrazac EP)")
+            st.table(st.session_state.invoices)
+            ukupni_promet = sum(item["Iznos (EUR)"] for item in st.session_state.invoices)
+            st.metric("UKUPNI PROMET ZA UPIS U TZ 2 OBRAZAC:", f"{ukupni_promet:.2f} €")
 
 # ==============================================================================
-# TAB 4: WHATSAPP PODSJETNICI I PRO PRETPLATA (TVOJA MONETIZACIJA)
+# TAB 4: SAMOUSLUŽNI POREZNI SAVJETNIK (ZAMJENA ZA KORISNIČKU PODRŠKU)
 # ==============================================================================
 with tab4:
-    st.subheader("📲 Automatski WhatsApp podsjetnici prije svakog roka")
-    st.write("Ne razmišljajte o datumima. Sustav vam 3 dana prije svakog zakonskog roka šalje izračunatu uplatnicu i poziv na broj direktno na vaš WhatsApp.")
+    st.subheader("🤖 Automatski Porezni Savjetnik (Odgovori bez čekanja)")
+    st.write("Odaberite pitanje koje vas muči i odmah pročitajte točan zakonski postupak:")
 
-    phone = st.text_input("Unesite vaš broj mobitela:", placeholder="091 123 4567")
+    faq = {
+        "1. Gdje naći PDF račun od Booking.com i Airbnba za prošli mjesec?":
+            "• **Booking.com:** Uđite u Extranet -> kliknite na **Financije (Finance)** -> **Fakture (Invoices)**. Tamo se svakog 5. u mjesecu pojavi račun za proviziju iz prošlog mjeseca.\n"
+            "• **Airbnb:** Otvorite konkretnu rezervaciju -> pod stavkom *Service fee (Naknada za uslugu)* kliknite na **Preuzmi PDV fakturu (Download VAT invoice)**.",
+        "2. Moram li slati PDV obrazac u mjesecu kada NISAM imao goste?":
+            "**NE!** Mali iznajmljivači (paušalci) koji imaju PDV identifikacijski broj samo zbog Bookinga/Airbnba šalju PDV i PDV-S obrazac **isključivo za one mjesece u kojima su imali račun za proviziju**. Ako u siječnju niste imali goste, ne šaljete ništa i ne plaćate ništa.",
+        "3. Moram li izdavati račun gostu ako je već platio preko Airbnba ili Bookinga?":
+            "**DA!** Bez obzira što je gost platio karticom preko portala, vi ste po zakonu dužni izdati račun na puni iznos smještaja (uključujući proviziju portala) i upisati ga u svoju *Evidenciju o prometu* (u našem Tabu 3).",
+        "4. Što ako sam zakasnio s uplatom PDV-a poslije 20. u mjesecu?":
+            "Nema razloga za paniku. Odmah pošaljite obrazac u ePoreznu i uplatite iznos putem našeg barkoda. Porezna uprava za par dana kašnjenja na male iznose obračunava zakonsku zateznu kamatu koja iznosi svega nekoliko centi.",
+        "5. Kako prvi put zatražiti PDV identifikacijski broj za Booking/Airbnb?":
+            "U sustavu ePorezna odaberite **Obrazac P-PDV** i označite da tražite samo *PDV identifikacijski broj za stjecanje usluga iz EU* (time NE ulazite u redovni sustav PDV-a i ostajete paušalac!)."
+    }
 
-    notify_types = st.multiselect(
-        "Odaberite koje obavijesti želite primati:",
+    for q, ans in faq.items():
+        with st.expander(q):
+            st.markdown(ans)
+
+# ==============================================================================
+# TAB 5: NAPLATA PRO PAKETA (PRILAGOĐENO HRVATSKOM TRŽIŠTU)
+# ==============================================================================
+with tab5:
+    st.subheader("⭐ Otključajte RentFin PRO za cijelu godinu (14,99 €)")
+    st.write("Jednokratna uplata za cijelu sezonu (bez skrivenih pretplata). Odaberite način plaćanja koji vam je najlakši:")
+
+    pay_method = st.radio(
+        "Odaberite način plaćanja:",
         [
-            "Mjesečni PDV na Booking/Airbnb (svakog 17. u mjesecu)",
-            "Kvartalni paušalni porez (28.3., 27.6., 27.9., 28.12.)",
-            "Turistička pristojba - 3 ljetne rate (28.7., 28.8., 27.9.)",
-            "Godišnja prijava TZ 2 obrasca (10. siječnja)"
-        ],
-        default=[
-            "Mjesečni PDV na Booking/Airbnb (svakog 17. u mjesecu)",
-            "Kvartalni paušalni porez (28.3., 27.6., 27.9., 28.12.)"
+            "📱 1. Skeniraj 2D barkod svojim m-bankingom (ZABA, PBZ, Erste, OTP...)",
+            "💳 2. Google Pay / Apple Pay / Kartica (Trenutno otključavanje)",
+            "⚡ 3. KEKS Pay ili Revolut (Bez naknade)"
         ]
     )
 
-    if st.button("✅ Aktiviraj moje WhatsApp podsjetnike", type="primary", use_container_width=True):
-        clean_phone = normalize_phone(phone)
-        if len(clean_phone) < 11 or not clean_phone.startswith("+"):
-            st.error("❌ Unesite ispravan broj mobitela (npr. 0911234567 ili +385911234567).")
-        elif len(g_oib) != 11 or not g_oib.isdigit():
-            st.error("❌ Unesite ispravan OIB u Koraku 1 na vrhu stranice.")
-        else:
-            q_rate = round((g_beds * CITIES[g_city]["tax"]) / 4, 2)
+    if "1. Skeniraj 2D barkod" in pay_method:
+        st.info("Skenirajte ovaj barkod svojom mobilnom bankom. U opis plaćanja automatski je upisan vaš OIB.")
+        pro_barcode = generate_hub3_barcode(
+            g_name, g_address, g_city,
+            MOJE_IME_FIRMA, MOJ_GRAD, MOJ_GRAD,
+            CIJENA_PRO_EUR, MOJ_IBAN_ZA_PRO,
+            "HR00", f"{g_oib}", "OTHR", f"RentFin PRO licenca {g_oib}"
+        )
+        st.image(pro_barcode, caption=f"RentFin PRO Licenca | Iznos: {CIJENA_PRO_EUR:.2f} €", width=320)
 
-            sub_record = {
-                "name": g_name,
-                "phone": clean_phone,
-                "oib": g_oib,
-                "city": g_city,
-                "beds": g_beds,
-                "quarterly_tax_eur": q_rate,
-                "notifications": notify_types,
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            save_subscriber(sub_record)
+        confirm_msg = f"Pozdrav! Upravo sam uplatio/la RentFin PRO paket ({CIJENA_PRO_EUR} EUR) putem m-bankinga. Moj OIB je: {g_oib}. Molim moj PRO ključ."
+        render_wa_button(
+            create_wa_direct_link(MOJ_WHATSAPP_BROJ, confirm_msg),
+            "📲 Kliknite ovdje nakon uplate za preuzimanje PRO ključa na WhatsApp"
+        )
 
-            welcome_msg = (
-                f"👋 Dobrodošli u *RentFin HR*, {g_name}!\n\n"
-                f"Vaš osobni kalendar uplatnica je aktiviran za OIB: *{g_oib}*.\n\n"
-                f"📌 *Vaši spremljeni podaci ({g_city}, {g_beds} kreveta):*\n"
-                f"• Kvartalna rata paušala: *{q_rate:.2f} EUR*\n"
-                f"• IBAN Grada/Općine: {CITIES[g_city]['iban']}\n"
-                f"• Poziv na broj za paušal: HR68 1503-{g_oib}\n"
-                f"• Poziv na broj za PDV: HR68 1201-{g_oib}\n\n"
-                f"🔔 *Aktivni podsjetnici:*\n" + "\n".join([f"✔️ {n}" for n in notify_types])
-            )
+    elif "2. Google Pay" in pay_method:
+        st.info("Kliknite na ljubičasti gumb ispod za sigurno plaćanje putem **Google Paya**, **Apple Paya** ili bilo koje **Visa/Mastercard** kartice.")
+        st.markdown(
+            f'<a href="{STRIPE_LINK}" target="_blank" class="pay-btn">'
+            f'💳 Plati {CIJENA_PRO_EUR:.2f} € (Google Pay / Apple Pay / Kartica)</a>',
+            unsafe_allow_html=True
+        )
 
-            st.success(f"🎉 Odlično! Broj {clean_phone} je zabilježen. Kliknite na zeleni gumb ispod kako biste odmah spremili svoj osobni karton s pozivima na broj u WhatsApp:")
-            render_wa_button(create_wa_direct_link(clean_phone, welcome_msg), "📲 Spremi moj porezni karton na WhatsApp")
-
-    st.markdown("""
-    <div class="pro-banner">
-        <h4>⭐ RentFin PRO Godišnji Paket (29,00 € / godišnje)</h4>
-        <p>Želite da sustav sam čita vaše Booking/Airbnb fakture i svakog 17. u mjesecu vam na WhatsApp pošalje gotovu sliku barkoda i XML za ePoreznu bez da ulazite u aplikaciju?</p>
-        <ul>
-            <li>✔️ Automatske uplatnice na WhatsAppu prije svakog roka</li>
-            <li>✔️ Gotove XML datoteke za PDV, PDV-S i TZ2 obrazac</li>
-            <li>✔️ Podrška na hrvatskom jeziku za sva pitanja oko ePorezne</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
+    else:
+        st.info(f"Pošaljite **{CIJENA_PRO_EUR:.2f} €** putem aplikacije **KEKS Pay** ili **Revolut** na broj: **+{MOJ_WHATSAPP_BROJ}** (u poruku upišite svoj OIB: `{g_oib}`).")
+        confirm_keks = f"Pozdrav! Šaljem uplatu od {CIJENA_PRO_EUR} EUR na KEKS Pay / Revolut za OIB: {g_oib}. Molim PRO ključ."
+        render_wa_button(
+            create_wa_direct_link(MOJ_WHATSAPP_BROJ, confirm_keks),
+            "📲 Javi se na WhatsApp za preuzimanje PRO ključa"
+        )
