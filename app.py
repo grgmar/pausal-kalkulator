@@ -49,66 +49,10 @@ st.markdown("""
         text-decoration: none !important; font-weight: bold; border-radius: 8px; margin-top: 8px;
         background-color: #635bff !important;
     }
-    /* MODERAN DIZAJN RAČUNA */
-    .invoice-card {
-        background-color: #ffffff;
-        color: #333333;
-        padding: 30px;
-        border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-        margin-top: 20px;
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    }
-    .invoice-header {
-        display: flex;
-        justify-content: space-between;
-        border-bottom: 2px solid #1f77b4;
-        padding-bottom: 15px;
-        margin-bottom: 20px;
-    }
-    .invoice-title {
-        font-size: 1.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        margin: 0;
-    }
-    .invoice-details, .client-details {
-        font-size: 0.95rem;
-        line-height: 1.5;
-    }
-    .invoice-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 20px;
-        margin-bottom: 20px;
-    }
-    .invoice-table th {
-        background-color: #1f77b4;
-        color: white;
-        text-align: left;
-        padding: 10px;
-        font-size: 0.9rem;
-    }
-    .invoice-table td {
-        padding: 10px;
-        border-bottom: 1px solid #e0e0e0;
-        font-size: 0.9rem;
-    }
-    .invoice-total {
-        text-align: right;
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #111;
-        margin-top: 15px;
-    }
-    .invoice-footer {
-        font-size: 0.8rem;
-        color: #666;
-        border-top: 1px solid #e0e0e0;
-        padding-top: 12px;
-        margin-top: 25px;
-        text-align: center;
+    .invoice-preview {
+        background-color: #ffffff; color: #111111; padding: 20px; border-radius: 10px;
+        border: 1px solid #dcdcdc; font-family: monospace; font-size: 0.9rem; margin-top: 15px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05); white-space: pre-wrap;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -286,78 +230,54 @@ with tab3:
             st.success("Račun uspješno dodan u Evidenciju!")
 
         if st.session_state.invoices:
-            st.subheader("🖨️ Pregled i ispis dizajnerskog računa")
+            st.subheader("🖨️ Pregled, ispis i preuzimanje računa")
             selected_inv_idx = st.selectbox(
-                "Odaberite račun za pregled:",
+                "Odaberite račun za akciju:",
                 range(len(st.session_state.invoices)),
-                format_func=lambda i: f"Račun br. {st.session_state.invoices[i]['Br']} - {st.session_state.invoices[i]['Gost']} ({st.session_state.invoices[i]['Iznos (EUR, format)'] if 'Iznos (EUR, format)' in st.session_state.invoices[i] else st.session_state.invoices[i]['Iznos (EUR)']} €)"
+                format_func=lambda i: f"Račun br. {st.session_state.invoices[i]['Br']} - {st.session_state.invoices[i]['Gost']} ({st.session_state.invoices[i]['Iznos (EUR)']} €)"
             )
             
             inv = st.session_state.invoices[selected_inv_idx]
             
-            # PREKRASAN HTML DIZAJN RAČUNA
-            invoice_html = f"""
-            <div class="invoice-card">
-                <div class="invoice-header">
-                    <div>
-                        <p class="invoice-title">RAČUN / INVOICE</p>
-                        <p style="color: #666; margin: 2px 0;">Oznaka: <b>{inv['Br']}</b></p>
-                    </div>
-                    <div style="text-align: right;">
-                        <p style="margin: 0; font-weight: bold; color: #333;">{g_name}</p>
-                        <p class="invoice-details" style="color: #666; margin: 2px 0;">{g_address}, {g_city}</p>
-                        <p class="invoice-details" style="color: #666; margin: 0;">OIB: {g_oib}</p>
-                    </div>
-                </div>
-                
-                <div style="margin-bottom: 20px;">
-                    <p style="margin: 0; font-size: 0.85rem; color: #888; text-transform: uppercase; font-weight: bold;">Podaci o gostu:</p>
-                    <p style="margin: 4px 0 0 0; font-size: 1.05rem; font-weight: bold; color: #222;">{inv['Gost']}</p>
-                    <p style="margin: 2px 0 0 0; font-size: 0.9rem; color: #666;">Način plaćanja: {inv['Način']}</p>
-                    <p style="margin: 2px 0 0 0; font-size: 0.9rem; color: #666;">Datum izdavanja: {inv['Datum']}</p>
-                </div>
-
-                <table class="invoice-table">
-                    <thead>
-                        <tr>
-                            <th>Opis usluge / Service description</th>
-                            <th style="text-align: center;">Noćenja</th>
-                            <th style="text-align: right;">Ukupno (EUR)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Usluga smještaja u apartmanu / Accommodation</td>
-                            <td style="text-align: center;">{nights}</td>
-                            <td style="text-align: right; font-weight: bold;">{inv['Iznos (EUR)']} €</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <div class="invoice-total">
-                    UKUPNO ZA PLATITI / TOTAL: {inv['Iznos (EUR)']} EUR
-                </div>
-
-                <div class="invoice-footer">
-                    <p style="margin: 0;">Napomena: Iznajmljivač nije u sustavu PDV-a temeljem čl. 90. st. 2. Zakona o PDV-u.</p>
-                    <p style="margin: 4px 0 0 0;">Račun je generiran elektronički putem RentFin HR sustava.</p>
-                </div>
-            </div>
+            invoice_text = f"""========================================
+       RAČUN / INVOICE Br. {inv['Br']}
+========================================
+Iznajmljivač: {g_name}
+Adresa: {g_address}, {g_city}
+OIB: {g_oib}
+----------------------------------------
+Gost: {inv['Gost']}
+Usluga: Smještaj u apartmanu ({nights} noćenja)
+Način plaćanja: {inv['Način']}
+----------------------------------------
+UKUPNO ZA PLATITI: {inv['Iznos (EUR)']} EUR
+----------------------------------------
+Napomena: Iznajmljivač nije u sustavu PDV-a
+temeljem čl. 90. st. 2. Zakona o PDV-u.
+Datum izdavanja: {inv['Datum']}
+========================================
             """
             
-            st.markdown(invoice_html, unsafe_allow_html=True)
+            # Prikaz računa u čistom, čitljivom okviru
+            st.markdown(f'<div class="invoice-preview">{invoice_text}</div>', unsafe_allow_html=True)
             
-            # Gumb za ispis preko preglednika
-            st.markdown("""
-                <script>
-                function printInvoice() {
-                    window.print();
-                }
-                </script>
-            """, unsafe_allow_html=True)
-            
-            if st.button("🖨️ Otvori prozor za ispis / spremanje u PDF", type="secondary", use_container_width=True):
-                st.info("💡 U prozoru za ispis koji se otvori odaberite opciju **'Spremi kao PDF' (Save as PDF)** ili odaberite svoj pisač.")
+            # ODVOJENE OPCIJE: ISPIS I PREUZIMANJE
+            b_col1, b_col2 = st.columns(2)
+            with b_col1:
+                st.download_button(
+                    "📥 Preuzmi račun (TXT)",
+                    data=invoice_text,
+                    file_name=f"Racun_{inv['Br'].replace('/', '_')}.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+            with b_col2:
+                # Koristimo Streamlit link_button s javascript print naredbom za otvaranje prozora za ispis
+                st.link_button(
+                    "🖨️ Otvori za ispis",
+                    url="javascript:window.print();",
+                    use_container_width=True
+                )
 
             st.subheader("📊 Evidencija o prometu i godišnji limit")
             st.table(st.session_state.invoices)
