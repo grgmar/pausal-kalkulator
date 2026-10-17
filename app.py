@@ -49,30 +49,10 @@ st.markdown("""
         text-decoration: none !important; font-weight: bold; border-radius: 8px; margin-top: 8px;
         background-color: #635bff !important;
     }
-    /* DIZAJN PRAVOG POSLOVNOG RAČUNA */
     .invoice-box {
-        background: #ffffff;
-        color: #222222;
-        padding: 25px;
-        border-radius: 12px;
-        border: 1px solid #dcdcdc;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        margin-top: 15px;
-        font-family: Arial, sans-serif;
+        background: #ffffff; color: #222222; padding: 25px; border-radius: 12px;
+        border: 1px solid #dcdcdc; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-top: 15px; font-family: Arial, sans-serif;
     }
-    .inv-header {
-        display: flex;
-        justify-content: space-between;
-        border-bottom: 2px solid #1f77b4;
-        padding-bottom: 12px;
-        margin-bottom: 15px;
-    }
-    .inv-title { font-size: 1.4rem; font-weight: bold; color: #1f77b4; margin: 0; }
-    .inv-table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 15px; }
-    .inv-table th { background-color: #1f77b4; color: white; text-align: left; padding: 8px; font-size: 0.85rem; }
-    .inv-table td { padding: 8px; border-bottom: 1px solid #e0e0e0; font-size: 0.85rem; color: #333; }
-    .inv-total { text-align: right; font-size: 1.1rem; font-weight: bold; color: #111; margin-top: 10px; }
-    .inv-footer { font-size: 0.75rem; color: #666; border-top: 1px solid #e0e0e0; padding-top: 10px; margin-top: 15px; text-align: center; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -187,57 +167,3 @@ with tab1:
         st.download_button("⬇️ Preuzmi uplatnicu (PNG)", data=barcode, file_name=f"PDV_mjesec_{month_ref}.png", mime="image/png", use_container_width=True)
 
 with tab2:
-    st.subheader("🛏️ Kvartalni paušal i Turistička članarina")
-    quarter = st.selectbox("Odaberite obvezu:", [
-        "Paušalni porez - 1. kvartal", "Paušalni porez - 2. kvartal",
-        "Paušalni porez - 3. kvartal", "Paušalni porez - 4. kvartal",
-        "Godišnja turistička članarina TZ"
-    ])
-
-    if "Paušalni porez" in quarter:
-        q_num = quarter[16]
-        amount_to_pay = round((g_beds * custom_tax_per_bed) / 4, 2)
-        target_iban = custom_iban
-        model, ref, desc = "HR68", f"1503-{g_oib}", f"Pausalni porez {q_num}. kv"
-    else:
-        amount_to_pay = round(g_beds * 11.25, 2)
-        target_iban = CITIES[g_city]["tz_iban"]
-        model, ref, desc = "HR67", f"{g_oib}", f"Turisticka clanarina"
-
-    st.metric("Iznos za uplatu", f"{amount_to_pay:.2f} €")
-
-    if st.button("🚀 Generiraj barkod za paušal", type="primary", use_container_width=True):
-        barcode = generate_hub3_barcode(
-            g_name, g_address, g_city, f"Grad/Općina", g_city, g_city,
-            amount_to_pay, target_iban, model, ref, "TAXS", desc
-        )
-        st.image(barcode, width=320)
-        st.download_button("⬇️ Preuzmi uplatnicu (PNG)", data=barcode, file_name="pausalna_uplatnica.png", mime="image/png", use_container_width=True)
-
-with tab3:
-    st.subheader("🧾 Računi za goste i Evidencija prometa")
-    if not is_pro:
-        st.markdown("""
-        <div class="locked-box">
-            <h4>🔒 Zaključano u PRO paketu</h4>
-            <p>Upišite testni kod <b>RENT2026</b> u Koraku 1 na vrhu da odmah otključate izradu računa i Evidenciju prometa!</p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        r1, r2, r3 = st.columns(3)
-        with r1:
-            inv_num = st.text_input("Br. računa", value=f"{len(st.session_state.invoices)+1}/2026")
-            guest_name = st.text_input("Gost", value="John Smith")
-        with r2:
-            nights = st.number_input("Noćenja", min_value=1, value=7)
-            price_per_night = st.number_input("Cijena/noć (€)", min_value=10.0, value=100.0, step=5.0)
-        with r3:
-            channel = st.selectbox("Plaćanje", ["Račun (Booking/Airbnb)", "Gotovina"])
-            inv_month = st.selectbox("Mjesec računa", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], index=datetime.now().month - 1)
-
-        total_inv = round(nights * price_per_night, 2)
-
-        if st.button("➕ Dodaj račun u Evidenciju", type="primary", use_container_width=True):
-            st.session_state.invoices.append({
-                "Br": inv_num,
-                "Mjesec": inv_month,
