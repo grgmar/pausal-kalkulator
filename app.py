@@ -1,8 +1,6 @@
 import streamlit as st
 import pdf417
 from io import BytesIO
-import smtplib
-from email.message import EmailMessage
 import json
 import os
 from datetime import datetime
@@ -25,12 +23,6 @@ MOJE_IME_FIRMA = "RentFin Obrt / Ime Prezime"
 MOJ_GRAD = "Zagreb"
 CIJENA_PRO_EUR = 14.99
 STRIPE_LINK = "https://buy.stripe.com/test_link"
-
-# SMTP POSTAVKE ZA SLANJE MAIL-OVA (Upiši podatke svog email servera, npr. Gmail App Password)
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_EMAIL = "tvoj.email@gmail.com"
-SMTP_PASSWORD = "tvoja_aplikacijska_lozinka"
 
 st.markdown("""
 <style>
@@ -55,12 +47,11 @@ st.markdown("""
         background: linear-gradient(135deg, #fff3cd, #ffe69c); border: 2px dashed #d39e00;
         padding: 18px; border-radius: 10px; margin-top: 12px; color: #332701; text-align: center;
     }
-    .mail-btn, .pay-btn {
+    .pay-btn {
         display: block; width: 100%; color: white !important; padding: 12px; text-align: center;
         text-decoration: none !important; font-weight: bold; border-radius: 8px; margin-top: 8px;
+        background-color: #635bff !important;
     }
-    .mail-btn { background-color: #007bff !important; }
-    .pay-btn { background-color: #635bff !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -117,29 +108,6 @@ def generate_hub3_barcode(
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-def send_email_with_barcode(to_email, subject, body, barcode_bytes):
-    """Šalje e-mail korisniku s priloženom slikom uplatnice."""
-    if not to_email or "@" not in to_email:
-        return False, "Neispravna e-mail adresa."
-    
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = SMTP_EMAIL
-    msg["To"] = to_email
-    msg.set_content(body)
-
-    # Priloži barkod sliku
-    msg.add_attachment(barcode_bytes, maintype="image", subtype="png", filename="uplatnica_barcode.png")
-
-    try:
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_EMAIL, SMTP_PASSWORD)
-            server.send_message(msg)
-        return True, "Uplatnica uspješno poslana na e-mail!"
-    except Exception as e:
-        return False, f"Greška pri slanju (provjerite SMTP postavke): {e}"
-
 st.markdown("""
 <div class="main-header">
     <h1>🇭🇷 RentFin HR</h1>
@@ -153,7 +121,6 @@ with st.expander("👤 KORAK 1: Vaši podaci i PRO status", expanded=True):
         g_name = st.text_input("Ime i prezime iznajmljivača", value="Ivan Horvat")
         g_oib = st.text_input("Vaš OIB (11 znamenki)", value="12345678901", max_chars=11)
         g_address = st.text_input("Adresa objekta", value="Obala HNP 1")
-        g_email = st.text_input("Vaša e-mail adresa (za slanje uplatnica)", value="primjer@gmail.com")
     with p2:
         g_city = st.selectbox("Grad / Općina / Turistička regija", list(CITIES.keys()))
         default_tax = CITIES[g_city]["tax"]
@@ -189,27 +156,14 @@ with tab1:
 
     st.metric("Ukupni PDV za uplatu (25%)", f"{pdv_amount:.2f} €")
 
-    if st.button("🚀 Generiraj barkod i pošalji na e-mail", type="primary", use_container_width=True):
+    if st.button("🚀 Generiraj barkod za PDV", type="primary", use_container_width=True):
         ref_num = f"1201-{g_oib}"
         barcode = generate_hub3_barcode(
             g_name, g_address, g_city, "Drzavni proracun RH", "Katanciceva 5", "Zagreb",
             pdv_amount, DRZAVNI_PRORACUN_IBAN, "HR68", ref_num, "TAXS", f"PDV provizija mj {month_ref}"
         )
         st.image(barcode, width=320)
-        
-        email_body = (
-            Poštovani/a {g_name},\n\n"
-            U prilogu se nalazi generirana uplatnica za PDV na proviziju (mjesec {month_ref}).\n\n"
-            - Iznos: {pdv_amount:.2f} EUR\n"
-            - IBAN: {DRZAVNI_PRORACUN_IBAN}\n"
-            - Poziv na broj: HR68 {ref_num}\n\n"
-            Lijep pozdrav,\nRentFin HR
-        )
-        success, msg = send_email_with_barcode(g_email, f"RentFin HR - Uplatnica za PDV (mj. {month_ref})", email_body, barcode)
-        if success:
-            st.success(f"✅ {msg} poslana na {g_email}")
-        else:
-            st.warning(f"ℹ️ {msg} (Barkod možete preuzeti i ručno s ekrana).")
+        st.download_button("⬇️ Preuzmi uplatnicu (PNG)", data=barcode, file_name=f"PDV_mjesec_{month_ref}.png", mime="image/png", use_container_width=True)
 
 with tab2:
     st.subheader("🛏️ Kvartalni paušal i Turistička članarina")
@@ -237,6 +191,7 @@ with tab2:
             amount_to_pay, target_iban, model, ref, "TAXS", desc
         )
         st.image(barcode, width=320)
+        st.download_button("⬇️ Preuzmi uplatnicu (PNG)", data=barcode, file_name="pausalna_uplatnica.png", mime="image/png", use_container_width=True)
 
 with tab3:
     st.subheader("🧾 Računi za goste i Evidencija prometa")
@@ -291,3 +246,4 @@ with tab5:
         CIJENA_PRO_EUR, MOJ_IBAN_ZA_PRO, "HR00", f"{g_oib}", "OTHR", f"RentFin PRO {g_oib}"
     )
     st.image(pro_barcode, width=320)
+    st.markdown(f'<a href="{STRIPE_LINK}" target="_blank" class="pay-btn">💳 Plati PRO karticom / Google Payom</a>', unsafe_allow_html=True)
