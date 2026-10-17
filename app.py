@@ -1,36 +1,64 @@
 import streamlit as st
 import pdf417
 from io import BytesIO
+import urllib.parse
+import requests
+import json
+import os
+from datetime import datetime
 
-st.set_page_config(page_title="RentFin HR - Paušal & Mjesečni PDV", page_icon="🇭🇷", layout="centered")
+st.set_page_config(
+    page_title="RentFin HR - Paušal & Mjesečni PDV",
+    page_icon="🇭🇷",
+    layout="centered"
+)
 
-# Baza lokalnih stopa
+# Baza lokalnih stopa (Paušalni porez i turistička pristojba po krevetu)
 CITIES = {
-    "Split": {"tax": 150.0, "fee": 50.0, "iban": "HR2423900011800000000"},
-    "Zagreb": {"tax": 199.0, "fee": 55.0, "iban": "HR1210010051863000160"},
-    "Dubrovnik": {"tax": 199.0, "fee": 60.0, "iban": "HR5523900011800000000"},
-    "Zadar": {"tax": 100.0, "fee": 45.0, "iban": "HR8823900011800000000"},
-    "Rijeka": {"tax": 100.0, "fee": 45.0, "iban": "HR4423900011800000000"},
-    "Pula": {"tax": 90.0, "fee": 45.0, "iban": "HR3323900011800000000"},
-    "Šibenik": {"tax": 100.0, "fee": 45.0, "iban": "HR6623900011800000000"},
-    "Makarska": {"tax": 150.0, "fee": 50.0, "iban": "HR7723900011800000000"},
-    "Ostale općine (minimalni paušal)": {"tax": 50.0, "fee": 40.0, "iban": "HR1123900011800000000"}
+    "Split": {"tax": 150.0, "fee": 50.0, "iban": "HR3324070001840900000"},
+    "Zagreb": {"tax": 199.0, "fee": 55.0, "iban": "HR3423600001813300007"},
+    "Dubrovnik": {"tax": 199.0, "fee": 60.0, "iban": "HR0424070001809800009"},
+    "Zadar": {"tax": 100.0, "fee": 45.0, "iban": "HR4524070001851900008"},
+    "Rijeka": {"tax": 100.0, "fee": 45.0, "iban": "HR6524020061837300005"},
+    "Pula": {"tax": 90.0, "fee": 45.0, "iban": "HR9523600001835600006"},
+    "Šibenik": {"tax": 100.0, "fee": 45.0, "iban": "HR4724070001843200008"},
+    "Makarska": {"tax": 150.0, "fee": 50.0, "iban": "HR4123900011824900000"},
+    "Ostale općine (minimalni paušal)": {"tax": 50.0, "fee": 40.0, "iban": "HR1210010051863000160"}
 }
 
-# IBAN Državnog proračuna za PDV
 DRZAVNI_PRORACUN_IBAN = "HR1210010051863000160"
+SUBSCRIBERS_FILE = "pretplatnici.json"
 
+
+# --- POMOĆNE FUNKCIJE ZA BARKOD I VALIDACIJU ---
 def format_hub3_amount(amount: float) -> str:
     cents = int(round(amount * 100))
     return f"{cents:015d}"
 
-def generate_hub3_barcode(name, address, city, oib, amount, iban, ref_model, ref_number, description):
+
+def normalize_phone(phone: str) -> str:
+    """Čisti broj mobitela i pretvara 09x u +3859x format."""
+    cleaned = "".join(c for c in phone if c.isdigit() or c == "+")
+    if cleaned.startswith("09"):
+        cleaned = "+385" + cleaned[1:]
+    elif cleaned.startswith("385"):
+        cleaned = "+" + cleaned
+    return cleaned
+
+
+def generate_hub3_barcode(
+    payer_name: str, payer_address: str, payer_city: str,
+    recipient_name: str, recipient_address: str, recipient_city: str,
+    amount: float, iban: str, ref_model: str, ref_number: str,
+    purpose_code: str, description: str
+) -> bytes:
     amount_str = format_hub3_amount(amount)
     fields = [
         "HRVHUB30", "EUR", amount_str,
-        name, address, city,
-        "Drzavni proracun RH", "Ksaver 200a", "Zagreb",
-        iban, ref_model, ref_number, "G10", description
+        payer_name[:30].strip(), payer_address[:27].strip(), payer_city[:27].strip(),
+        recipient_name[:25].strip(), recipient_address[:25].strip(), recipient_city[:27].strip(),
+        iban.replace(" ", "").strip(), ref_model[:4].strip(), ref_number[:22].strip(),
+        purpose_code[:4].strip(), description[:35].strip()
     ]
     payload = "\n".join(fields)
     codes = pdf417.encode(payload, columns=6, security_level=4)
@@ -39,84 +67,67 @@ def generate_hub3_barcode(name, address, city, oib, amount, iban, ref_model, ref
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-st.title("🇭🇷 RentFin HR")
-st.caption("Financijski asistent za male iznajmljivače: Uplatnice i porezni podsjetnici.")
 
-tab1, tab2, tab3 = st.tabs(["⚡ Mjesečni PDV (Booking/Airbnb)", "📅 Kvartalni paušal", "📲 WhatsApp podsjetnici"])
+# --- WHATSAPP FUNKCIJE ---
+def create_wa_direct_link(phone: str, message: str) -> str:
+    """Kreira direktni wa.me link s unaprijed ispunjenim tekstom uplatnice."""
+    clean_num = normalize_phone(phone).replace("+", "")
+    encoded_msg = urllib.parse.quote(message)
+    if clean_num:
+        return f"https://wa.me/{clean_num}?text={encoded_msg}"
+    return f"https://wa.me/?text={encoded_msg}"
 
-# --- TAB 1: MJESEČNI PDV NA PROVIZIJU ---
-with tab1:
-    st.subheader("Obračun 25% PDV-a na stranu proviziju")
-    st.info("Plaća se do svakog 20. u mjesecu za fakture iz prethodnog mjeseca.")
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        platform = st.selectbox("Platforma", ["Booking.com", "Airbnb", "Ostale inozemne platforme"])
-        commission_eur = st.number_input("Ukupan iznos provizije na računu (€)", min_value=1.0, value=120.0, step=5.0)
-    with c2:
-        user_name = st.text_input("Ime i prezime", "Ivan Horvat", key="t1_name")
-        user_oib = st.text_input("OIB platitelja", "12345678901", key="t1_oib")
-        user_city = st.text_input("Vaš grad", "Split", key="t1_city")
 
-    pdv_amount = commission_eur * 0.25
-    
-    st.metric("Iznos PDV-a za uplatu (25%)", f"{pdv_amount:.2f} €")
+def send_whatsapp_api_message(to_phone: str, message_body: str, provider: str, api_config: dict) -> tuple[bool, str]:
+    """Šalje stvarnu WhatsApp poruku putem Twilio ili Meta Cloud API-ja."""
+    clean_to = normalize_phone(to_phone)
 
-    if st.button("Generiraj uplatnicu za PDV", type="primary", key="btn_pdv"):
-        if len(user_oib) != 11 or not user_oib.isdigit():
-            st.error("Unesite ispravan OIB od 11 znamenki.")
-        else:
-            barcode = generate_hub3_barcode(
-                user_name, "Adresa", user_city, user_oib, pdv_amount,
-                DRZAVNI_PRORACUN_IBAN, "HR68", f"1058-{user_oib}", f"PDV na proviziju {platform}"
-            )
-            st.image(barcode, caption="Skenirajte m-bankingom (Model HR68, šifra 1058 - PDV)", width=320)
-            st.success(f"Uplatnica na {pdv_amount:.2f} € uspješno kreirana.")
+    if provider == "Twilio API":
+        sid = api_config.get("account_sid", "").strip()
+        token = api_config.get("auth_token", "").strip()
+        from_num = api_config.get("from_number", "+14155238886").strip()
 
-# --- TAB 2: KVARTALNI PAUŠAL ---
-with tab2:
-    st.subheader("Godišnji paušal po krevetu")
-    k1, k2 = st.columns(2)
-    with k1:
-        selected_city = st.selectbox("Grad / Općina", list(CITIES.keys()))
-        beds = st.number_input("Broj kreveta", min_value=1, max_value=50, value=4)
-        quarter = st.selectbox("Kvartal", [1, 2, 3, 4])
-    with k2:
-        k_name = st.text_input("Ime i prezime", "Ivan Horvat", key="t2_name")
-        k_oib = st.text_input("OIB platitelja", "12345678901", key="t2_oib")
+        if not sid or not token:
+            return False, "Demo mod (Twilio API ključevi nisu uneseni - koristi direktni WhatsApp link ispod)."
 
-    city_data = CITIES[selected_city]
-    q_tax = (beds * city_data["tax"]) / 4
-    
-    st.metric(f"Iznos poreza za {quarter}. kvartal", f"{q_tax:.2f} €")
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+        data = {
+            "From": f"whatsapp:{from_num}",
+            "To": f"whatsapp:{clean_to}",
+            "Body": message_body
+        }
+        try:
+            resp = requests.post(url, data=data, auth=(sid, token), timeout=10)
+            if resp.status_code in (200, 201):
+                return True, "Poruka uspješno poslana putem Twilio WhatsApp API-ja!"
+            return False, f"Twilio greška ({resp.status_code}): {resp.text}"
+        except Exception as e:
+            return False, f"Greška pri spajanju na Twilio: {e}"
 
-    if st.button("Generiraj uplatnicu za paušal", key="btn_pausal"):
-        if len(k_oib) != 11 or not k_oib.isdigit():
-            st.error("Unesite ispravan OIB.")
-        else:
-            barcode = generate_hub3_barcode(
-                k_name, "Adresa", selected_city, k_oib, q_tax,
-                city_data["iban"], "HR68", f"2401-{k_oib}-0{quarter}", f"Porezni pausal Q{quarter}"
-            )
-            st.image(barcode, caption="Skenirajte m-bankingom (Šifra 2401 - Paušalni porez)", width=320)
+    elif provider == "Meta Cloud API (Službeni)":
+        token = api_config.get("meta_token", "").strip()
+        phone_id = api_config.get("phone_id", "").strip()
 
-# --- TAB 3: WHATSAPP PODSJETNICI ---
-with tab3:
-    st.subheader("📲 Automatski podsjetnici na mobitel")
-    st.write("Nemojte plaćati kamate zbog zaboravljenih rokova. Primite uplatnicu na WhatsApp 3 dana prije svakog dospijeća.")
-    
-    phone = st.text_input("Vaš broj mobitela (npr. +38591xxxxxxx)")
-    notify_types = st.multiselect(
-        "Koje podsjetnike želite primati?",
-        ["Mjesečni PDV na Booking/Airbnb (svakog 17. u mjesecu)", "Kvartalni paušalni porez (31.3., 30.6., 30.9., 31.12.)"],
-        default=["Mjesečni PDV na Booking/Airbnb (svakog 17. u mjesecu)"]
-    )
-    
-    if st.button("Aktiviraj WhatsApp podsjetnik"):
-        if len(phone) >= 9:
-            # Spremanje kontakta u lokalnu listu
-            with open("pretplatnici.txt", "a") as f:
-                f.write(f"{phone} | {','.join(notify_types)}\n")
-            st.success("✅ Vaš broj je zabilježen! Dobit ćete poruku dobrodošlice na WhatsApp.")
-        else:
-            st.error("Unesite ispravan broj mobitela s pozivnim brojem.")
+        if not token or not phone_id:
+            return False, "Demo mod (Meta API ključevi nisu uneseni - koristi direktni WhatsApp link ispod)."
+
+        url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": clean_to.replace("+", ""),
+            "type": "text",
+            "text": {"body": message_body}
+        }
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=10)
+            if resp.status_code in (200, 201):
+                return True, "Poruka uspješno poslana putem Meta WhatsApp API-ja!"
+            return False, f"Meta API greška ({resp.status_code}): {resp.text}"
+        except Exception as e:
+            return False, f"Greška pri spajanju na Meta API: {e}"
+
+    return
