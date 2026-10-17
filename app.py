@@ -49,11 +49,30 @@ st.markdown("""
         text-decoration: none !important; font-weight: bold; border-radius: 8px; margin-top: 8px;
         background-color: #635bff !important;
     }
-    .invoice-preview {
-        background-color: #ffffff; color: #111111; padding: 20px; border-radius: 10px;
-        border: 1px solid #dcdcdc; font-family: monospace; font-size: 0.9rem; margin-top: 15px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05); white-space: pre-wrap;
+    /* DIZAJN PRAVOG POSLOVNOG RAČUNA */
+    .invoice-box {
+        background: #ffffff;
+        color: #222222;
+        padding: 25px;
+        border-radius: 12px;
+        border: 1px solid #dcdcdc;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        margin-top: 15px;
+        font-family: Arial, sans-serif;
     }
+    .inv-header {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 2px solid #1f77b4;
+        padding-bottom: 12px;
+        margin-bottom: 15px;
+    }
+    .inv-title { font-size: 1.4rem; font-weight: bold; color: #1f77b4; margin: 0; }
+    .inv-table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 15px; }
+    .inv-table th { background-color: #1f77b4; color: white; text-align: left; padding: 8px; font-size: 0.85rem; }
+    .inv-table td { padding: 8px; border-bottom: 1px solid #e0e0e0; font-size: 0.85rem; color: #333; }
+    .inv-total { text-align: right; font-size: 1.1rem; font-weight: bold; color: #111; margin-top: 10px; }
+    .inv-footer { font-size: 0.75rem; color: #666; border-top: 1px solid #e0e0e0; padding-top: 10px; margin-top: 15px; text-align: center; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -222,89 +241,3 @@ with tab3:
             st.session_state.invoices.append({
                 "Br": inv_num,
                 "Mjesec": inv_month,
-                "Datum": datetime.now().strftime("%d.%m.%Y."),
-                "Gost": guest_name,
-                "Način": channel,
-                "Iznos (EUR)": f"{total_inv:.2f}"
-            })
-            st.success("Račun uspješno dodan u Evidenciju!")
-
-        if st.session_state.invoices:
-            st.subheader("🖨️ Pregled, ispis i preuzimanje računa")
-            selected_inv_idx = st.selectbox(
-                "Odaberite račun za akciju:",
-                range(len(st.session_state.invoices)),
-                format_func=lambda i: f"Račun br. {st.session_state.invoices[i]['Br']} - {st.session_state.invoices[i]['Gost']} ({st.session_state.invoices[i]['Iznos (EUR)']} €)"
-            )
-            
-            inv = st.session_state.invoices[selected_inv_idx]
-            
-            invoice_text = f"""========================================
-       RAČUN / INVOICE Br. {inv['Br']}
-========================================
-Iznajmljivač: {g_name}
-Adresa: {g_address}, {g_city}
-OIB: {g_oib}
-----------------------------------------
-Gost: {inv['Gost']}
-Usluga: Smještaj u apartmanu ({nights} noćenja)
-Način plaćanja: {inv['Način']}
-----------------------------------------
-UKUPNO ZA PLATITI: {inv['Iznos (EUR)']} EUR
-----------------------------------------
-Napomena: Iznajmljivač nije u sustavu PDV-a
-temeljem čl. 90. st. 2. Zakona o PDV-u.
-Datum izdavanja: {inv['Datum']}
-========================================
-            """
-            
-            # Prikaz računa u čistom, čitljivom okviru
-            st.markdown(f'<div class="invoice-preview">{invoice_text}</div>', unsafe_allow_html=True)
-            
-            # ODVOJENE OPCIJE: ISPIS I PREUZIMANJE
-            b_col1, b_col2 = st.columns(2)
-            with b_col1:
-                st.download_button(
-                    "📥 Preuzmi račun (TXT)",
-                    data=invoice_text,
-                    file_name=f"Racun_{inv['Br'].replace('/', '_')}.txt",
-                    mime="text/plain",
-                    use_container_width=True
-                )
-            with b_col2:
-                # Koristimo Streamlit link_button s javascript print naredbom za otvaranje prozora za ispis
-                st.link_button(
-                    "🖨️ Otvori za ispis",
-                    url="javascript:window.print();",
-                    use_container_width=True
-                )
-
-            st.subheader("📊 Evidencija o prometu i godišnji limit")
-            st.table(st.session_state.invoices)
-            
-            ukupni_promet = sum(float(item["Iznos (EUR)"]) for item in st.session_state.invoices)
-            limit_pdv = 40000.0
-            
-            col_m1, col_m2 = st.columns(2)
-            col_m1.metric("UKUPNI GODIŠNJI PROMET", f"{ukupni_promet:.2f} €")
-            col_m2.metric("Limit za ulazak u PDV", f"{limit_pdv:,.2f} €", delta=f"{limit_pdv - ukupni_promet:.2f} € do limita", delta_color="normal")
-            
-            progress_val = min(ukupni_promet / limit_pdv, 1.0)
-            st.progress(progress_val, text=f"Iskorištenost godišnjeg limita ({(ukupni_promet/limit_pdv)*100:.1f}%)")
-
-with tab4:
-    st.subheader("🤖 Porezni Savjetnik")
-    st.markdown("""
-    * **Gdje naći PDF račun Bookinga?** U Extranetu pod *Financije -> Fakture*.
-    * **Moram li slati prazan PDV obrazac?** Ne, šalje se samo za mjesece kad je bilo provizije.
-    """)
-
-with tab5:
-    st.subheader("⭐ Otključajte PRO (14,99 €)")
-    st.info("Skenirajte m-bankingom ili platite karticom.")
-    pro_barcode = generate_hub3_barcode(
-        g_name, g_address, g_city, MOJE_IME_FIRMA, MOJ_GRAD, MOJ_GRAD,
-        CIJENA_PRO_EUR, MOJ_IBAN_ZA_PRO, "HR00", f"{g_oib}", "OTHR", f"RentFin PRO {g_oib}"
-    )
-    st.image(pro_barcode, width=320)
-    st.markdown(f'<a href="{STRIPE_LINK}" target="_blank" class="pay-btn">💳 Plati PRO karticom / Google Payom</a>', unsafe_allow_html=True)
