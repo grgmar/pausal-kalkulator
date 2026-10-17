@@ -58,6 +58,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# VELIKA BAZA GRADOVA I OPĆINA U HRVATSKOJ
 CITIES = {
     "Split": {"tax": 150.0, "fee": 50.0, "iban": "HR3324070001840900000", "tz_iban": "HR4310010051738904754"},
     "Zagreb": {"tax": 199.0, "fee": 55.0, "iban": "HR3423600001813300007", "tz_iban": "HR6110010051713304759"},
@@ -67,7 +68,15 @@ CITIES = {
     "Pula": {"tax": 90.0, "fee": 45.0, "iban": "HR9523600001835600006", "tz_iban": "HR0910010051735604756"},
     "Šibenik": {"tax": 100.0, "fee": 45.0, "iban": "HR4724070001843200008", "tz_iban": "HR7710010051743204757"},
     "Makarska": {"tax": 150.0, "fee": 50.0, "iban": "HR4123900011824900000", "tz_iban": "HR3610010051724904750"},
-    "Unesite iznos ručno s poreznog rješenja": {"tax": 100.0, "fee": 45.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"}
+    "Rovinj": {"tax": 150.0, "fee": 50.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
+    "Poreč": {"tax": 150.0, "fee": 50.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
+    "Umag": {"tax": 130.0, "fee": 45.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
+    "Opatija": {"tax": 150.0, "fee": 55.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
+    "Zadar - Okica / Vir / Bibinje": {"tax": 100.0, "fee": 45.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
+    "Makarska rivijera (Baška Voda, Tučepi...)": {"tax": 130.0, "fee": 45.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
+    "Hvar / Brač / Korčula (otoci)": {"tax": 150.0, "fee": 50.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
+    "Plitvička Jezera / Rakovica": {"tax": 80.0, "fee": 40.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
+    "Ostale općine i gradovi (Unesite ručno s rješenja)": {"tax": 60.0, "fee": 40.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"}
 }
 
 DRZAVNI_PRORACUN_IBAN = "HR1210010051863000160"
@@ -136,13 +145,12 @@ with st.expander("👤 KORAK 1: Vaši podaci i PRO status", expanded=True):
         g_oib = st.text_input("Vaš OIB (11 znamenki)", value="12345678901", max_chars=11)
         g_address = st.text_input("Adresa objekta", value="Obala HNP 1")
     with p2:
-        g_city = st.selectbox("Grad / Općina / Mjesto", list(CITIES.keys()))
+        g_city = st.selectbox("Grad / Općina / Turistička regija", list(CITIES.keys()))
         
-        # Ako je izabrano ručno, omogući upis iz rješenja
-        if g_city == "Unesite iznos ručno s poreznog rješenja":
-            custom_tax_per_bed = st.number_input("Godišnji paušal po 1 krevetu (€ s rješenja):", min_value=19.0, value=100.0, step=5.0)
-        else:
-            custom_tax_per_bed = CITIES[g_city]["tax"]
+        # Ako je izabrano ručno ili želi korigirati, omogući upis točnog iznosa s rješenja
+        default_tax = CITIES[g_city]["tax"]
+        custom_tax_per_bed = st.number_input("Godišnji paušal po 1 krevetu (€ s vašeg rješenja):", min_value=19.0, value=float(default_tax), step=5.0)
+        custom_iban = st.text_input("IBAN općine/grada za uplatu paušala:", value=CITIES[g_city]["iban"])
 
         g_beds = st.number_input("Broj glavnih kreveta", min_value=1, max_value=50, value=4)
         pro_code_input = st.text_input("🔑 PRO ključ:", placeholder="Npr. RENT2026")
@@ -184,7 +192,7 @@ with tab1:
 
 with tab2:
     st.subheader("🛏️ Kvartalni paušal i Turistička članarina")
-    quarter = st.selectbox("Odaberite:", [
+    quarter = st.selectbox("Odaberite obvezu:", [
         "Paušalni porez - 1. kvartal", "Paušalni porez - 2. kvartal",
         "Paušalni porez - 3. kvartal", "Paušalni porez - 4. kvartal",
         "Godišnja turistička članarina TZ"
@@ -193,7 +201,7 @@ with tab2:
     if "Paušalni porez" in quarter:
         q_num = quarter[16]
         amount_to_pay = round((g_beds * custom_tax_per_bed) / 4, 2)
-        target_iban = CITIES[g_city]["iban"] if g_city != "Unesite iznos ručno s poreznog rješenja" else "HR1210010051863000160"
+        target_iban = custom_iban
         model, ref, desc = "HR68", f"1503-{g_oib}", f"Pausalni porez {q_num}. kv"
     else:
         amount_to_pay = round(g_beds * 11.25, 2)
@@ -204,7 +212,7 @@ with tab2:
 
     if st.button("🚀 Generiraj barkod za paušal", type="primary", use_container_width=True):
         barcode = generate_hub3_barcode(
-            g_name, g_address, g_city, f"Grad/TZ", g_city, g_city,
+            g_name, g_address, g_city, f"Grad/Općina", g_city, g_city,
             amount_to_pay, target_iban, model, ref, "TAXS", desc
         )
         st.image(barcode, width=320)
