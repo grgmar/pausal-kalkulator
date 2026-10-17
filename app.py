@@ -49,6 +49,10 @@ st.markdown("""
         text-decoration: none !important; font-weight: bold; border-radius: 8px; margin-top: 8px;
         background-color: #635bff !important;
     }
+    .invoice-box {
+        background: #ffffff; color: #222222; padding: 25px; border-radius: 12px;
+        border: 1px solid #dcdcdc; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-top: 15px; font-family: Arial, sans-serif;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -159,4 +163,38 @@ with tab1:
         ref_num = f"1201-{g_oib}"
         barcode = generate_hub3_barcode(
             g_name, g_address, g_city, "Drzavni proracun RH", "Katanciceva 5", "Zagreb",
-            pdv_amount, DRZAVNI_PRORACUN_IBAN, "
+            pdv_amount, DRZAVNI_PRORACUN_IBAN, "HR68", ref_num, "TAXS", f"PDV provizija mj {month_ref}"
+        )
+        st.image(barcode, width=320)
+        st.download_button("⬇️ Preuzmi uplatnicu (PNG)", data=barcode, file_name=f"PDV_mjesec_{month_ref}.png", mime="image/png", use_container_width=True)
+
+with tab2:
+    st.subheader("🛏️ Kvartalni paušal i Turistička članarina")
+    quarter = st.selectbox("Odaberite obvezu:", [
+        "Paušalni porez - 1. kvartal", "Paušalni porez - 2. kvartal",
+        "Paušalni porez - 3. kvartal", "Paušalni porez - 4. kvartal",
+        "Godišnja turistička članarina TZ"
+    ])
+
+    if "Paušalni porez" in quarter:
+        q_num = quarter[16]
+        amount_to_pay = round((g_beds * custom_tax_per_bed) / 4, 2)
+        target_iban = custom_iban
+        model, ref, desc = "HR68", f"1503-{g_oib}", f"Pausalni porez {q_num}. kv"
+    else:
+        amount_to_pay = round(g_beds * 11.25, 2)
+        target_iban = CITIES[g_city]["tz_iban"]
+        model, ref, desc = "HR67", f"{g_oib}", f"Turisticka clanarina"
+
+    st.metric("Iznos za uplatu", f"{amount_to_pay:.2f} €")
+
+    if st.button("🚀 Generiraj barkod za paušal", type="primary", use_container_width=True):
+        barcode = generate_hub3_barcode(
+            g_name, g_address, g_city, f"Grad/Općina", g_city, g_city,
+            amount_to_pay, target_iban, model, ref, "TAXS", desc
+        )
+        st.image(barcode, width=320)
+        st.download_button("⬇️ Preuzmi uplatnicu (PNG)", data=barcode, file_name="pausalna_uplatnica.png", mime="image/png", use_container_width=True)
+
+with tab3:
+    st.subheader("🧾 Računi za goste i Evid
