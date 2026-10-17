@@ -49,10 +49,6 @@ st.markdown("""
         text-decoration: none !important; font-weight: bold; border-radius: 8px; margin-top: 8px;
         background-color: #635bff !important;
     }
-    .invoice-box {
-        background: #ffffff; color: #222222; padding: 25px; border-radius: 12px;
-        border: 1px solid #dcdcdc; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-top: 15px; font-family: Arial, sans-serif;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -149,8 +145,10 @@ with tab1:
     month_ref = st.selectbox("Mjesec:", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], index=6)
     
     c_b, c_a = st.columns(2)
-    with c_b: booking_eur = st.number_input("Booking provizija (€):", min_value=0.0, value=120.0, step=10.0)
-    with c_a: airbnb_eur = st.number_input("Airbnb provizija (€):", min_value=0.0, value=0.0, step=10.0)
+    with c_b: 
+        booking_eur = st.number_input("Booking provizija (€):", min_value=0.0, value=120.0, step=10.0)
+    with c_a: 
+        airbnb_eur = st.number_input("Airbnb provizija (€):", min_value=0.0, value=0.0, step=10.0)
 
     total_base = round(booking_eur + airbnb_eur, 2)
     pdv_amount = round(total_base * 0.25, 2)
@@ -161,9 +159,4 @@ with tab1:
         ref_num = f"1201-{g_oib}"
         barcode = generate_hub3_barcode(
             g_name, g_address, g_city, "Drzavni proracun RH", "Katanciceva 5", "Zagreb",
-            pdv_amount, DRZAVNI_PRORACUN_IBAN, "HR68", ref_num, "TAXS", f"PDV provizija mj {month_ref}"
-        )
-        st.image(barcode, width=320)
-        st.download_button("⬇️ Preuzmi uplatnicu (PNG)", data=barcode, file_name=f"PDV_mjesec_{month_ref}.png", mime="image/png", use_container_width=True)
-
-with tab2:
+            pdv_amount, DRZAVNI_PRORACUN_IBAN, "
