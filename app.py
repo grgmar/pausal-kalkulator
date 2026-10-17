@@ -1,7 +1,8 @@
 import streamlit as st
 import pdf417
 from io import BytesIO
-import urllib.parse
+import smtplib
+from email.message import EmailMessage
 import json
 import os
 from datetime import datetime
@@ -24,7 +25,12 @@ MOJE_IME_FIRMA = "RentFin Obrt / Ime Prezime"
 MOJ_GRAD = "Zagreb"
 CIJENA_PRO_EUR = 14.99
 STRIPE_LINK = "https://buy.stripe.com/test_link"
-MOJ_WHATSAPP_BROJ = "385911234567"
+
+# SMTP POSTAVKE ZA SLANJE MAIL-OVA (Upiši podatke svog email servera, npr. Gmail App Password)
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_EMAIL = "tvoj.email@gmail.com"
+SMTP_PASSWORD = "tvoja_aplikacijska_lozinka"
 
 st.markdown("""
 <style>
@@ -49,16 +55,15 @@ st.markdown("""
         background: linear-gradient(135deg, #fff3cd, #ffe69c); border: 2px dashed #d39e00;
         padding: 18px; border-radius: 10px; margin-top: 12px; color: #332701; text-align: center;
     }
-    .wa-btn, .pay-btn {
+    .mail-btn, .pay-btn {
         display: block; width: 100%; color: white !important; padding: 12px; text-align: center;
         text-decoration: none !important; font-weight: bold; border-radius: 8px; margin-top: 8px;
     }
-    .wa-btn { background-color: #25D366 !important; }
+    .mail-btn { background-color: #007bff !important; }
     .pay-btn { background-color: #635bff !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# VELIKA BAZA GRADOVA I OPĆINA U HRVATSKOJ
 CITIES = {
     "Split": {"tax": 150.0, "fee": 50.0, "iban": "HR3324070001840900000", "tz_iban": "HR4310010051738904754"},
     "Zagreb": {"tax": 199.0, "fee": 55.0, "iban": "HR3423600001813300007", "tz_iban": "HR6110010051713304759"},
@@ -69,13 +74,6 @@ CITIES = {
     "Šibenik": {"tax": 100.0, "fee": 45.0, "iban": "HR4724070001843200008", "tz_iban": "HR7710010051743204757"},
     "Makarska": {"tax": 150.0, "fee": 50.0, "iban": "HR4123900011824900000", "tz_iban": "HR3610010051724904750"},
     "Rovinj": {"tax": 150.0, "fee": 50.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
-    "Poreč": {"tax": 150.0, "fee": 50.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
-    "Umag": {"tax": 130.0, "fee": 45.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
-    "Opatija": {"tax": 150.0, "fee": 55.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
-    "Zadar - Okica / Vir / Bibinje": {"tax": 100.0, "fee": 45.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
-    "Makarska rivijera (Baška Voda, Tučepi...)": {"tax": 130.0, "fee": 45.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
-    "Hvar / Brač / Korčula (otoci)": {"tax": 150.0, "fee": 50.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
-    "Plitvička Jezera / Rakovica": {"tax": 80.0, "fee": 40.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"},
     "Ostale općine i gradovi (Unesite ručno s rješenja)": {"tax": 60.0, "fee": 40.0, "iban": "HR1210010051863000160", "tz_iban": "HR1210010051863000160"}
 }
 
@@ -98,18 +96,6 @@ def check_pro_access(entered_code, oib):
     clean = str(entered_code).strip().upper()
     return clean in ["RENT2026", get_expected_pro_code(oib)]
 
-def create_wa_direct_link(phone, message):
-    clean_num = "".join(c for c in str(phone) if c.isdigit())
-    if clean_num.startswith("09"):
-        clean_num = "385" + clean_num[1:]
-    encoded_msg = urllib.parse.quote(message)
-    if clean_num:
-        return f"https://wa.me/{clean_num}?text={encoded_msg}"
-    return f"https://wa.me/?text={encoded_msg}"
-
-def render_wa_button(url, text="📲 Pošalji podatke na WhatsApp"):
-    st.markdown(f'<a href="{url}" target="_blank" class="wa-btn">{text}</a>', unsafe_allow_html=True)
-
 def generate_hub3_barcode(
     payer_name, payer_address, payer_city,
     recipient_name, recipient_address, recipient_city,
@@ -131,6 +117,29 @@ def generate_hub3_barcode(
     img.save(buf, format="PNG")
     return buf.getvalue()
 
+def send_email_with_barcode(to_email, subject, body, barcode_bytes):
+    """Šalje e-mail korisniku s priloženom slikom uplatnice."""
+    if not to_email or "@" not in to_email:
+        return False, "Neispravna e-mail adresa."
+    
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = SMTP_EMAIL
+    msg["To"] = to_email
+    msg.set_content(body)
+
+    # Priloži barkod sliku
+    msg.add_attachment(barcode_bytes, maintype="image", subtype="png", filename="uplatnica_barcode.png")
+
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.send_message(msg)
+        return True, "Uplatnica uspješno poslana na e-mail!"
+    except Exception as e:
+        return False, f"Greška pri slanju (provjerite SMTP postavke): {e}"
+
 st.markdown("""
 <div class="main-header">
     <h1>🇭🇷 RentFin HR</h1>
@@ -144,14 +153,12 @@ with st.expander("👤 KORAK 1: Vaši podaci i PRO status", expanded=True):
         g_name = st.text_input("Ime i prezime iznajmljivača", value="Ivan Horvat")
         g_oib = st.text_input("Vaš OIB (11 znamenki)", value="12345678901", max_chars=11)
         g_address = st.text_input("Adresa objekta", value="Obala HNP 1")
+        g_email = st.text_input("Vaša e-mail adresa (za slanje uplatnica)", value="primjer@gmail.com")
     with p2:
         g_city = st.selectbox("Grad / Općina / Turistička regija", list(CITIES.keys()))
-        
-        # Ako je izabrano ručno ili želi korigirati, omogući upis točnog iznosa s rješenja
         default_tax = CITIES[g_city]["tax"]
-        custom_tax_per_bed = st.number_input("Godišnji paušal po 1 krevetu (€ s vašeg rješenja):", min_value=19.0, value=float(default_tax), step=5.0)
+        custom_tax_per_bed = st.number_input("Godišnji paušal po 1 krevetu (€ s rješenja):", min_value=19.0, value=float(default_tax), step=5.0)
         custom_iban = st.text_input("IBAN općine/grada za uplatu paušala:", value=CITIES[g_city]["iban"])
-
         g_beds = st.number_input("Broj glavnih kreveta", min_value=1, max_value=50, value=4)
         pro_code_input = st.text_input("🔑 PRO ključ:", placeholder="Npr. RENT2026")
 
@@ -182,13 +189,27 @@ with tab1:
 
     st.metric("Ukupni PDV za uplatu (25%)", f"{pdv_amount:.2f} €")
 
-    if st.button("🚀 Generiraj barkod za PDV", type="primary", use_container_width=True):
+    if st.button("🚀 Generiraj barkod i pošalji na e-mail", type="primary", use_container_width=True):
         ref_num = f"1201-{g_oib}"
         barcode = generate_hub3_barcode(
             g_name, g_address, g_city, "Drzavni proracun RH", "Katanciceva 5", "Zagreb",
             pdv_amount, DRZAVNI_PRORACUN_IBAN, "HR68", ref_num, "TAXS", f"PDV provizija mj {month_ref}"
         )
         st.image(barcode, width=320)
+        
+        email_body = (
+            Poštovani/a {g_name},\n\n"
+            U prilogu se nalazi generirana uplatnica za PDV na proviziju (mjesec {month_ref}).\n\n"
+            - Iznos: {pdv_amount:.2f} EUR\n"
+            - IBAN: {DRZAVNI_PRORACUN_IBAN}\n"
+            - Poziv na broj: HR68 {ref_num}\n\n"
+            Lijep pozdrav,\nRentFin HR
+        )
+        success, msg = send_email_with_barcode(g_email, f"RentFin HR - Uplatnica za PDV (mj. {month_ref})", email_body, barcode)
+        if success:
+            st.success(f"✅ {msg} poslana na {g_email}")
+        else:
+            st.warning(f"ℹ️ {msg} (Barkod možete preuzeti i ručno s ekrana).")
 
 with tab2:
     st.subheader("🛏️ Kvartalni paušal i Turistička članarina")
@@ -249,23 +270,6 @@ with tab3:
             })
             st.success("Račun uspješno dodan!")
 
-            st.code(f"""
-========================================
-       RAČUN / INVOICE Br. {inv_num}
-========================================
-Iznajmljivač: {g_name} | OIB: {g_oib}
-Adresa: {g_address}, {g_city}
-----------------------------------------
-Gost: {guest_name}
-Usluga: Smještaj ({nights} noćenja)
-UKUPNO ZA PLATITI: {total_inv:.2f} EUR
-----------------------------------------
-Napomena: Iznajmljivač nije u sustavu PDV-a
-temeljem čl. 90. st. 2. Zakona o PDV-u.
-Datum: {datetime.now().strftime("%d.%m.%Y.")}
-========================================
-            """)
-
         if st.session_state.invoices:
             st.subheader("📊 Evidencija o prometu (Obrazac EP)")
             st.table(st.session_state.invoices)
@@ -287,4 +291,3 @@ with tab5:
         CIJENA_PRO_EUR, MOJ_IBAN_ZA_PRO, "HR00", f"{g_oib}", "OTHR", f"RentFin PRO {g_oib}"
     )
     st.image(pro_barcode, width=320)
-    render_wa_button(create_wa_direct_link(MOJ_WHATSAPP_BROJ, f"Uplatio sam PRO za OIB: {g_oib}"), "📲 Pošalji potvrdu na WhatsApp")
