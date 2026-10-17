@@ -40,9 +40,6 @@ st.markdown("""
         background-color: #1f77b4; color: white; padding: 2px 8px;
         border-radius: 15px; font-weight: bold; font-size: 0.8rem; margin-right: 6px;
     }
-    .eporezna-box {
-        background-color: #fff8e6; border: 2px solid #ffc107; padding: 15px; border-radius: 10px; margin-top: 12px; color: #212529;
-    }
     .locked-box {
         background: linear-gradient(135deg, #fff3cd, #ffe69c); border: 2px dashed #d39e00;
         padding: 18px; border-radius: 10px; margin-top: 12px; color: #332701; text-align: center;
@@ -51,6 +48,10 @@ st.markdown("""
         display: block; width: 100%; color: white !important; padding: 12px; text-align: center;
         text-decoration: none !important; font-weight: bold; border-radius: 8px; margin-top: 8px;
         background-color: #635bff !important;
+    }
+    .print-container {
+        background-color: white; color: black; padding: 20px; border-radius: 10px;
+        border: 1px solid #ccc; font-family: monospace; margin-top: 15px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -136,7 +137,7 @@ with st.expander("👤 KORAK 1: Vaši podaci i PRO status", expanded=True):
         st.info("ℹ️ Besplatna verzija. Upišite kod `RENT2026` za test PRO značajki.")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "⚡ 1. PDV", "🛏️ 2. Paušal & TZ", "🧾 3. Računi (PRO)", "🤖 4. Savjetnik", "⭐ 5. Kupi PRO"
+    "⚡ 1. PDV", "🛏️ 2. Paušal & TZ", "🧾 3. Računi & Evidencija (PRO)", "🤖 4. Savjetnik", "⭐ 5. Kupi PRO"
 ])
 
 with tab1:
@@ -212,24 +213,72 @@ with tab3:
             price_per_night = st.number_input("Cijena/noć (€)", min_value=10.0, value=100.0, step=5.0)
         with r3:
             channel = st.selectbox("Plaćanje", ["Račun (Booking/Airbnb)", "Gotovina"])
+            inv_month = st.selectbox("Mjesec računa", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], index=datetime.now().month - 1)
 
         total_inv = round(nights * price_per_night, 2)
 
         if st.button("➕ Dodaj račun u Evidenciju", type="primary", use_container_width=True):
             st.session_state.invoices.append({
-                "Broj računa": inv_num,
+                "Br": inv_num,
+                "Mjesec": inv_month,
                 "Datum": datetime.now().strftime("%d.%m.%Y."),
                 "Gost": guest_name,
                 "Način": channel,
                 "Iznos (EUR)": f"{total_inv:.2f}"
             })
-            st.success("Račun uspješno dodan!")
+            st.success("Račun uspješno dodan u Evidenciju!")
 
         if st.session_state.invoices:
-            st.subheader("📊 Evidencija o prometu (Obrazac EP)")
+            st.subheader("🖨️ Pregled i ispis računa")
+            selected_inv_idx = st.selectbox(
+                "Odaberite račun za ispis/pregled:",
+                range(len(st.session_state.invoices)),
+                format_func=lambda i: f"Račun br. {st.session_state.invoices[i]['Br']} - {st.session_state.invoices[i]['Gost']} ({st.session_state.invoices[i]['Iznos (EUR)']} €)"
+            )
+            
+            inv = st.session_state.invoices[selected_inv_idx]
+            invoice_text = f"""
+========================================
+       RAČUN / INVOICE Br. {inv['Br']}
+========================================
+Iznajmljivač: {g_name}
+Adresa: {g_address}, {g_city}
+OIB: {g_oib}
+----------------------------------------
+Gost: {inv['Gost']}
+Usluga: Smještaj u apartmanu 
+Način plaćanja: {inv['Način']}
+----------------------------------------
+UKUPNO ZA PLATITI: {inv['Iznos (EUR)']} EUR
+----------------------------------------
+Napomena: Iznajmljivač nije u sustavu PDV-a
+temeljem čl. 90. st. 2. Zakona o PDV-u.
+Datum izdavanja: {inv['Datum']}
+========================================
+            """
+            st.markdown(f'<div class="print-container"><pre>{invoice_text}</pre></div>', unsafe_allow_html=True)
+            
+            st.download_button(
+                "📥 Preuzmi tekstualni račun (TXT/Ispis)",
+                data=invoice_text,
+                file_name=f"Racun_{inv['Br'].replace('/', '_')}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+
+            st.subheader("📊 Evidencija o prometu i godišnji limit")
             st.table(st.session_state.invoices)
+            
             ukupni_promet = sum(float(item["Iznos (EUR)"]) for item in st.session_state.invoices)
-            st.metric("UKUPNI PROMET ZA TZ 2:", f"{ukupni_promet:.2f} €")
+            limit_pdv = 40000.0
+            
+            col_m1, col_m2 = st.columns(2)
+            col_m1.metric("UKUPNI GODIŠNJI PROMET", f"{ukupni_promet:.2f} €")
+            col_m2.metric("Limit za ulazak u PDV", f"{limit_pdv:,.2f} €", delta=f"{limit_pdv - ukupni_promet:.2f} € do limita", delta_color="normal")
+            
+            # Napredak prema limitu
+            progress_val = min(ukupni_promet / limit_pdv, 1.0)
+            st.progress(progress_val, text=f"Iskorištenost godišnjeg limita ({(ukupni_promet/limit_pdv)*100:.1f}%)")
 
 with tab4:
     st.subheader("🤖 Porezni Savjetnik")
